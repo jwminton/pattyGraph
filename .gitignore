@@ -1,0 +1,34 @@
+# Build output
+dist/
+
+# Go build/test artifacts
+/pattyGraph
+/pattygraph
+*.test
+*.out
+
+# Coverage / profiling
+coverage.out
+*.prof
+*.pprof
+
+# Local/editor files
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+!examples/*.log
+
+# Local config/secrets
+.env
+*.local
+RELEASE_NOTES_LOCAL.md
+
+# Temporary files
+tmp/

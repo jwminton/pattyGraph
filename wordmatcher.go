@@ -1,0 +1,1953 @@
+package main
+
+import (
+	"container/heap"
+	"container/list"
+	"fmt"
+	"log"
+	"math"
+	"sort"
+	"strings"
+	"sync"
+)
+
+// Convert the slice to a map for quick lookups
+func makeCommonWordMap(words []string) map[string]bool {
+	cWords := make(map[string]bool, len(words))
+	for _, word := range words {
+		cWords[word] = true
+	}
+	return cWords
+}
+
+// These were in but then removed. Don't add them back in.
+// "+", " ",
+// "-", " ",
+var symbolReplacer = strings.NewReplacer(
+	"(", " ",
+	")", " ",
+	",", " ",
+	"[", " ",
+	"]", " ",
+	":", " ",
+	";", " ",
+	"/", " ",
+	"\\", " ",
+	"?", "  ",
+	"&", " ",
+)
+
+var commonWords map[string]bool // To filter out known uninteresting words todo should be global
+
+type InterestingWordMatcher struct {
+	mName             string
+	timeToLive        int
+	pushIntervalCount int             // TODO: is this needed?
+	peakWords         []string        // Ordered list of words that made it above threshold
+	peakWordsSet      map[string]bool // Helper map to ensure unique entries in peakWords
+	wordFrequency     map[string]*WordStats
+
+	// printed keys eligible for selection
+	currentListing []string
+	selectedKey    string
+
+	lineParser    func() string
+	lineTokenizer func(parsedLine string) []string
+
+	displayWidth int
+
+	// caches & scratches
+	titleFormat           string
+	fullTitleFormat       string
+	fullFormat            string
+	ipScratch             *ipGroupScratch
+	selectedGraphCache    string
+	matchedBuilder        strings.Builder
+	peakBuilder           strings.Builder
+	printedEntriesScratch []string
+	// topTracker might be overkill as an LRU now, but its cost is minimal
+	topTracker   *TopWordTracker
+	groupTracker *TopPrefixTracker
+	lruTracker   *ScoredLRUTracker
+
+	// for metrics
+	peakWordCounts   []int // rolling list of peak word counts
+	totalPeakCounts  int   // sum of all counts in `peakWordCounts`
+	wordStatsCreated int
+	//wordStatsRepopulated int
+	//wordStatsRepopMetric *ringBuffer
+}
+
+//var ipsWordStatsRepopBuf = &ringBuffer{}
+//var ipsWordStatsRepopBuf = &ringBuffer{}
+
+// NewInterestingWordMatcher initializes a new matcher with desired parameters
+func NewInterestingWordMatcher(matcherName string, slidingWindowDuration int) *InterestingWordMatcher {
+	if commonWords == nil {
+		commonWords = makeCommonWordMap(commonWordList)
+	}
+	// Only Constructor
+	m := InterestingWordMatcher{
+		mName:         matcherName,
+		wordFrequency: make(map[string]*WordStats, 4096),
+
+		peakWordsSet:          make(map[string]bool, 25),
+		timeToLive:            slidingWindowDuration,
+		displayWidth:          26,
+		titleFormat:           fmt.Sprintf("%%-%ds", botsDisplayWidth-19),
+		topTracker:            NewTopWordTracker(InterestingWordListSize + 25),
+		lruTracker:            NewScoredLRUTracker(InterestingWordListSize + 50),
+		printedEntriesScratch: make([]string, InterestingWordListSize+50),
+	}
+	m.fullTitleFormat = "[#F4F4F4]Interesting " + m.titleFormat + "[#999999]%6.6s[default:-]\n"
+	m.ensureFullFormat()
+	return &m
+}
+
+// TODO Revisit and try to remove these unhelpful MatcherFacade entries
+func (m *InterestingWordMatcher) matcherName() string {
+	return m.mName
+}
+func (m *InterestingWordMatcher) isHistoric() bool {
+	return false
+}
+func (m *InterestingWordMatcher) setColor(color string) {
+}
+func (m *InterestingWordMatcher) getCount() int { return 0 }
+func (m *InterestingWordMatcher) minMaxHistory() (int, int) {
+	return 0, 0
+}
+
+func (m *InterestingWordMatcher) setPurgeInterval(timeToLive int) {
+	m.timeToLive = timeToLive
+}
+
+func (m *InterestingWordMatcher) displayString() string {
+	if PattyGraph.selectedInterestingMatcher == m && m.selectedKey != "" {
+		sparkBuilder := strings.Builder{}
+		fv := 0
+		stats := m.wordFrequency[m.selectedKey]
+		var sparkSlice []int
+		if stats == nil && m.ipScratch != nil {
+			// This is the groupedIP spoofed WordStats made just for this display
+			stats = m.ipScratch.prefixStats[m.selectedKey]
+			if stats != nil {
+				sparkSlice = m.ipScratch.prefixHistorAggregateBufs[m.selectedKey].Slice()
+				fv = sparkSlice[len(sparkSlice)-1]
+			}
+		} else if stats != nil {
+			sparkSlice = stats.historySlice()
+			fv = stats.historyBuf.Latest()
+		}
+		if stats == nil {
+			return fmt.Sprintf("[default]%-10.10s   -:   -|[-:-]\n", m.selectedKey)
+		}
+
+		lineColor := "[default:-]"
+		if stats.source != nil && stats.source.captureColor != "" {
+			lineColor = stats.source.captureColor
+		}
+
+		sparkBuilder.WriteString(fmt.Sprintf("%s%-10.10s%4s:%4s|", lineColor, m.selectionKey(),
+			formatCounts(stats.count), formatCounts(fv)))
+		wordBottom := 0
+		wordTop := max(lastMonitorMaxBuf.Latest(), fv*11/10)
+
+		// CACHE THIS? -- NO for ip groups its an aggregate that's changing with each update
+		sparkBuilder.WriteString(sparklineFromArray(wordBottom, wordTop, sparkSlice)) // gets reversed
+		sparkBuilder.WriteString("[-:-]\n")
+
+		//// careful here bc nil access when things are selected and things get timed out
+		//line := ""
+		//if stats.source != nil {
+		//	line = stats.source.logLine
+		//	// IP Groups don't have a log line bc its a faux entry for the aggregate
+		//	// use last line if tabbed from first tab view
+		//	if PattyGraph.tabViewIndexKey == 1 {
+		//		if stats.firstIntervalLine != nil && stats.firstIntervalLine.logLine != "" {
+		//			line = stats.firstIntervalLine.logLine
+		//		} else {
+		//			line = ""
+		//		}
+		//	} else if PattyGraph.tabViewIndexKey > 1 {
+		//		if stats.lastLine != nil && stats.lastLine.logLine != "" {
+		//			line = stats.lastLine.logLine
+		//		}
+		//	}
+		//}
+		//
+		//sparkBuilder.WriteString(
+		//	prettyPrintLogLine(line,
+		//		PattyGraph.selectedInterestingMatcher.selectedKey,
+		//		startingLineColor))
+		return sparkBuilder.String()
+	}
+	return ""
+}
+func (m *InterestingWordMatcher) displayLogLine() string {
+	if PattyGraph.selectedInterestingMatcher == m && m.selectedKey != "" {
+		sparkBuilder := strings.Builder{}
+		stats := m.wordFrequency[m.selectedKey]
+		if stats == nil && m.ipScratch != nil {
+			// This is the groupedIP spoofed WordStats made just for this display
+			stats = m.ipScratch.prefixStats[m.selectedKey]
+		}
+		if stats == nil {
+			return ""
+		}
+		lineColor := "[default:-]"
+		if stats.source != nil && stats.source.captureColor != "" {
+			lineColor = stats.source.captureColor
+		}
+		startingLineColor := lineColor
+
+		// careful here bc nil access when things are selected and things get timed out
+		line := ""
+		if stats.source != nil {
+			line = stats.source.logLine
+			// IP Groups don't have a log line bc its a faux entry for the aggregate
+			// use last line if tabbed from first tab view
+			if PattyGraph.tabViewIndexKey == 1 {
+				line = stats.firstIntervalLogLine
+				//if stats.firstIntervalLine != nil && stats.firstIntervalLine.logLine != "" {
+				//	line = stats.firstIntervalLine.logLine
+				//} else {
+				//	line = ""
+				//}
+			} else if PattyGraph.tabViewIndexKey > 1 {
+				//if stats.lastLine != nil && stats.lastLine.logLine != "" {
+				//	line = stats.lastLine.logLine
+				//}
+				line = stats.lastLogLine
+			}
+		}
+
+		sparkBuilder.WriteString(
+			prettyPrintLogLine(line,
+				PattyGraph.selectedInterestingMatcher.selectedKey,
+				startingLineColor))
+		return sparkBuilder.String()
+	}
+	return ""
+}
+
+func prettyPrintLogLine(line, selectedKey, lineColor string) string {
+	sparkBuilder := strings.Builder{}
+	sparkBuilder.WriteString(lineColor)
+	for i := 0; i < len(line); i += PattyPrintWidth {
+		end := i + PattyPrintWidth
+		if end > len(line) {
+			end = len(line)
+		}
+		baseText := line[i:end]
+		// if "match" bridges a PattyPrintWidth boundary, fine, we just won't highlight
+		if selectedKey != "" {
+			if idx := strings.Index(baseText, selectedKey); idx != -1 {
+				// Inject highlight tags
+				prefix := baseText[:idx]
+				match := baseText[idx : idx+len(selectedKey)]
+				suffix := baseText[idx+len(selectedKey):]
+				baseText = prefix + "[white]" + match + lineColor + suffix
+			}
+		}
+
+		sparkBuilder.WriteString(baseText)
+		sparkBuilder.WriteString("\n")
+	}
+	return sparkBuilder.String()
+}
+
+// TODO: I have two different but core ways of tracking history, each grows the opposite of the other
+//
+//	This is one place it matters.
+func reversedCopy(arr []int) []int {
+	n := len(arr)
+	result := make([]int, n)
+	for i, v := range arr {
+		result[n-1-i] = v
+	}
+	return result
+}
+
+func ipsParseLine() string {
+	return currentLine.ip
+}
+func refsParseLineFast() string {
+	ref := currentLine.referer
+
+	if len(ref) == 0 || ref == "-" || ref == " " {
+		return "--empty--"
+	}
+
+	if i := strings.Index(ref, "//"); i != -1 {
+		// Avoids reassignment, preserves original input if needed
+		return symbolReplacer.Replace(ref[i+2:])
+	}
+
+	return symbolReplacer.Replace(ref)
+}
+
+func wordsParseLine() string {
+	// User-Agent content will come from pre-processed inputLine.userAgentTokens during token processing
+	return symbolReplacer.Replace(currentLine.request)
+}
+
+var tokenScratch = make([]string, 0, 100)
+
+func tokensForIps(parseLine string) []string {
+	result := tokenScratch[:1]
+	result[0] = parseLine
+	return result
+}
+
+func tokensForRefs(parseLine string) []string {
+	rawWords := fastFieldsASCIIBuf(parseLine, &refFieldsBuf) // tokens for refs
+	if cap(tokenScratch) < len(rawWords) {
+		tokenScratch = make([]string, 0, len(rawWords)*2)
+	}
+	result := tokenScratch[:0]
+	for _, word := range rawWords {
+		if len(word) >= DefaultMinWordLength {
+			result = append(result, stringInterner.Intern(word))
+		}
+	}
+	return result
+}
+
+func tokensForWords(parseLine string) []string {
+	// Split the logLine into words
+	rawWords := fastFieldsASCIIBuf(parseLine, &reqFieldsBuf) // tokens for words
+	// Filter out uninteresting & small words
+	if cap(tokenScratch) < len(rawWords)+len(currentLine.userAgentTokens) {
+		tokenScratch = make([]string, 0, (len(rawWords)+len(currentLine.userAgentTokens))*2)
+	}
+	words := tokenScratch[:0]
+	for _, word := range currentLine.userAgentTokens {
+		if isInteresting(word) {
+			// userAgent tokens have already been interned
+			words = append(words, word)
+		}
+	}
+	PattyGraph.totalAgentTokens += uint64(len(words))
+
+	for _, word := range rawWords {
+		if isInteresting(word) {
+			words = append(words, stringInterner.Intern(word))
+		}
+	}
+	if len(words) == 0 {
+		// its the most generic request possible "/" and filtered userAgent content
+		words = append(words, filteredToken)
+	}
+	return words
+}
+
+// processes a logLine of text to find and intervalCount interesting words
+func (m *InterestingWordMatcher) match() bool {
+	poolGetsStart := poolGets
+	// Making these be assigned func's was a huge win for logic and efficiency
+	words := m.lineTokenizer(m.lineParser())
+
+	// invariant for this call
+	// example tests to keep logic identical
+	// lc 20 ttl 5 lastSeen 15 = lives(skip new creation)
+	// lc 21 ttl 5 lastSeen 15 = purge(new creation)
+	//matcherDurationInt := m.timeToLive
+	limit := logicalCycles - m.timeToLive
+	// TODO: should probably be encapsulated in a WordStats func
+	for _, word := range words {
+		stats, exists := m.wordFrequency[word]
+		// if new or should be timed out
+		if !exists || stats.lastSeenTic < limit {
+			if exists {
+				// This happens, but at an exceedingly low amount, so just drop stats and get a new one.
+				recycleWordStats(stats)
+				//// TODO: take this out. its exceedingly rare. <100 for >1Mil
+				//repopulateWordStats(stats)
+				//m.wordStatsRepopulated++
+			}
+			m.wordFrequency[word] = newWordStats()
+			m.wordStatsCreated++
+			m.lruTracker.MarkSeen(word, 1)
+			if m.ipScratch != nil {
+				m.ipScratch.Add(currentLine.ip, currentLine.ipPrefix)
+			}
+			continue
+		}
+
+		stats.count++
+		stats.bytes += uint64(currentLine.bytesValue)
+		stats.primeFlux++
+		m.lruTracker.MarkSeen(word, stats.primeFlux)
+		stats.burstiCache = 0
+		stats.lastLogLine = currentLine.logLine
+		if stats.firstIntervalLogLine == "" {
+			stats.firstIntervalLogLine = currentLine.logLine
+		}
+		stats.lastSeenTic = logicalCycles
+		stats.lastStatus = currentLine.respCode
+		if currentLine.captureColor != "" && (!firstColorWins || stats.source.captureColor == "") {
+			stats.source.captureColor = currentLine.captureColor
+		}
+		previousWeight := float64(stats.count)
+		newWeight := previousWeight + 1
+		stats.agentDeltaMetric = ((stats.agentDeltaMetric * previousWeight) + currentLine.userAgentDelta) / newWeight
+	}
+	poolGetsStop := poolGets
+	poolGetsThisCall := poolGetsStop - poolGetsStart
+	poolGetsPerMatcherMap[poolGetsThisCall]++
+
+	return false // This is ignored for wordMatchers. Bool only here for autobot matching and this is a shared interface
+}
+
+// WordStats This started as a lightweight struct for metadata about word matches but it
+// seems to be growing. It needs color access made better and I think moving "peakness"
+// to here would solve some problems, thus the new write-only flag for now.
+// All three values get used in hotpaths: count, first, count+first
+// Invariant: primeFlux = count + nFlux
+// Invariant: nFlux = history[0] or 0
+// Maintained manually during creation, push() and count increment sites.
+// Doing the math at mutation time and keeping the cache in sync is a huge win bc its such a hot-path item.
+type WordStats struct {
+	// --- Counters and derived metrics ---
+	count            int
+	bytes            uint64
+	primeFlux        int
+	burstiCache      float64
+	agentDeltaMetric float64
+
+	// --- History tracking ---
+	historyBuf          *ringBuffer
+	historyBufferCache  *[]int
+	reversedBufferCache *[]int
+
+	// --- Identity / visual metadata ---
+	forcedColor           string
+	agentTokensFromSource []string
+
+	//tokenBandHistogram [6]int
+
+	// --- State and lifecycle tracking ---
+	lastSeenTic int
+	lastStatus  string
+	source      *lineSource // captureColor,
+
+	// --- Display only ---
+	firstIntervalLogLine string
+	lastLogLine          string
+}
+
+func (w *WordStats) allHistoryIndicator() string {
+	switch w.historyLength() {
+	case PattyGraph.intervalsCompleted:
+		return "+"
+	case DefaultHistoryDepth:
+		return "+"
+	default:
+		return " "
+	}
+}
+
+func (w *WordStats) captureColor() string {
+	keyColor := w.forcedColor
+	if w.source != nil && w.source.captureColor != "" {
+		keyColor = w.source.captureColor
+	}
+	if keyColor != "" {
+		// unwrap the brackets to put them on later
+		// todo use a consistent color representation with or without brackets
+		//      but not both
+		return keyColor[1 : len(keyColor)-1]
+	}
+	return ""
+}
+
+func (w *WordStats) pattyMonoColor() string {
+	return pattyMonoColorForInt(w.historyLength())
+}
+
+func (w *WordStats) burstiness() float64 {
+	// Cache this expensive operation. Invalidate on push and increments
+	if w.burstiCache > 0 {
+		return w.burstiCache
+	}
+	depth := float64(w.historyLength())
+	if depth <= 1 {
+		return 0.0
+	}
+
+	// Its tempting to adjust this according to 'intervals completed so far' but that
+	// ends up being too strong of an influence in the early stages. This evens it out
+	// appropriately (for how it feels and providing useful "texture" to the metric).
+	//depthScale := (1.10 * depth) / DefaultHistoryDepth
+	depthScale := depth / DefaultHistoryDepth
+	slice := w.historySlice()
+	// Calculate mean
+	sum := 0
+	for _, count := range slice {
+		sum += count
+	}
+	mean := float64(sum) / depth
+	if mean == 0 {
+		return 0 // Prevent division by zero
+	}
+
+	// Calculate standard deviation
+	variance := 0.0
+	for _, count := range slice {
+		diff := float64(count) - mean
+		variance += diff * diff
+	}
+	variance /= depth
+	stdDev := math.Sqrt(variance)
+
+	// This has evolved so many times. Still iffy :(
+	w.burstiCache = (stdDev / mean) * (1 + w.agentDeltaMetric) * depthScale
+	//w.burstiCache = (stdDev / mean) * (1 + w.agentDeltaMetric)
+	return w.burstiCache
+}
+
+// this usage gets reversed!
+func (ws *WordStats) historySlice() []int {
+	if ws.historyBufferCache == nil {
+		ws.historyBufferCache = ws.historyBuf.Slice()
+	}
+	return *ws.historyBufferCache
+}
+func (ws *WordStats) reversedHistorySlice() []int {
+	if ws.reversedBufferCache == nil {
+		ws.reversedBufferCache = ws.historyBuf.ReverseSlice()
+	}
+	return *ws.reversedBufferCache
+}
+
+func (ws *WordStats) historyLength() int {
+	return ws.historyBuf.Len()
+}
+func (ws *WordStats) historyAt(i int) int {
+	return ws.historyBuf.At(i)
+}
+
+var fluxDepth = 3
+
+func (ws *WordStats) push() {
+	ws.historyBuf.Push(ws.count)
+	ws.historyBufferCache = nil
+	ws.reversedBufferCache = nil
+
+	ws.primeFlux = ws.historyBuf.nFlux(fluxDepth)
+	//ws.nFlux = ws.historyBuf.nFlux(fluxDepth)
+
+	// Reset the intervalCount to 0
+	ws.count = 0
+	ws.bytes = 0
+	ws.burstiCache = 0
+}
+
+func (ws *WordStats) historyTotal() int { // EXPENSIVE!!!
+	if ws.historyLength() != 0 {
+		return ws.historyBuf.Total()
+	}
+	return 0 // Return a default value if history is empty
+}
+
+func (ws *WordStats) normalized() float64 { // EXPENSIVE!!!
+	historyLen := ws.historyLength()
+	if historyLen != 0 {
+		return float64(ws.historyTotal()) / float64(historyLen) * pattyScaleFactor * (1 + ws.agentDeltaMetric) // EXPENSIVE!!!
+	}
+	return float64(ws.count)
+}
+
+// push (aka flagInterestingWords) identifies words that exceed the threshold and are "interesting"
+// threshold is globalavg
+func (m *InterestingWordMatcher) push() {
+	m.pushIntervalCount++
+	m.selectedGraphCache = ""
+	// invariants
+	nDenom := m.normalizedDenominator()
+	limit := logicalCycles - m.timeToLive
+	for word, stats := range m.wordFrequency {
+		// Remove entries outside the sliding window to keep data fresh
+		// but make push wait just a little longer so we're not stepping on match timing/pruning
+		//if logicalCycles-stats.lastSeenTic > timeToLive {
+		if stats.lastSeenTic < limit {
+			if !m.peakWordsSet[word] {
+				// This delete and m.ipScratch.Remove MUST be kept in sync.
+				delete(m.wordFrequency, word)
+				if m.ipScratch != nil {
+					//delete stats.source.ipPrefix -> word
+					m.ipScratch.Remove(stats.source.ip, stats.source.ipPrefix)
+				}
+				recycleWordStats(stats)
+			}
+			m.lruTracker.Delete(word)
+			continue
+		}
+		oldCount := stats.count
+		stats.push()
+
+		/** MOVE TO PEAK DECISION
+		 */
+		// Tried to pull it all out for simplicity in identifying what's going on
+		// don't make any Peak decisions unless we've completed pattyGracePeriod cycles
+		if m.pushIntervalCount >= pattyGracePeriod {
+			if !m.peakWordsSet[word] {
+				stat := m.wordFrequency[word]
+				if stat.historyLength() >= pattyGracePeriod {
+					if m.mName == "ips" {
+						sBurst := stats.burstiness() // should match what is used in secondaryMetric display
+						//if (oldCount > 10 && sBurst >= 1.0) || oldCount > (lastLinesMax+lastLastLinesMax)/20 {
+						if (oldCount > 10 && sBurst >= 1.0) || float64(oldCount) > (lastLinesBuf.nFluxAvg(fluxDepth)/10) {
+							// combine with below when isPeak is redone
+							m.peakWords = append(m.peakWords, word)
+							m.peakWordsSet[word] = true
+							//stat.isPeak = true
+						}
+					} else {
+						if stat.normalized()/nDenom >= 1.0 {
+							m.peakWords = append(m.peakWords, word)
+							m.peakWordsSet[word] = true
+							//stat.isPeak = true
+						}
+					}
+				}
+			}
+		}
+	}
+	//m.wordStatsRepopMetric.Push(m.wordStatsRepopulated)
+	m.updatePeakWordStats()
+	m.wordStatsCreated = 0
+	//m.wordStatsRepopulated = 0
+}
+
+// calls to this need to be cached. Great to call once per display :), terrible once per entry :(
+func (m *InterestingWordMatcher) normalizedDenominator() float64 {
+	if PattyGraph.intervalsCompleted == 0 {
+		return PattyGraph.linesMatcher.previousAverage() / 10.0
+	}
+	return (float64(lastLinesBuf.nFlux(fluxDepth)) + (2 * PattyGraph.linesMatcher.previousAverage())) / float64((fluxDepth+2)*10.0) // go go gadgetcompiler
+	//return (float64(lastLastLinesMax+lastLinesMax) + (2 * PattyGraph.linesMatcher.previousAverage())) / (4 * 10.0) // go go gadgetcompiler
+	//return m.pushVal * 10
+}
+
+type ipGroupScratch struct {
+	mEntries                 map[string]int
+	mColors                  map[string]string
+	prefixCounts             map[string]int
+	prefixColors             map[string]string
+	prefixDepths             map[string]int
+	prefixBursts             map[string]float64
+	prefixBytes              map[string]uint64
+	prefixDeltas             map[string]float64
+	prefixMembers            map[string]int
+	prefixStats              map[string]*WordStats
+	prefixFirstPlusCounts    map[string]int
+	prefixFirstLines         map[string]string
+	prefixLastLines          map[string]string
+	prefixFirstIntervalLines map[string]string
+	//prefixHistoryBufs        map[string]*ringBuffer
+
+	prefixHistorAggregateBufs map[string]*ringSeriesAccumulator
+
+	// prefix → set of member IPs (existence only)
+	prefixToIPs map[string]map[string]struct{} // does NOT get cleared!
+	// derived state for fast ActivePrefixes:
+	activePrefixes     map[string]struct{} // only prefixes with count ≥ threshold
+	activePrefixCounts map[string]int
+	// metrics
+	activePrefixesCountMetric int
+}
+
+func (s *ipGroupScratch) Clear() {
+	for k := range s.prefixFirstPlusCounts {
+		delete(s.prefixFirstPlusCounts, k)
+	}
+	for k := range s.prefixCounts {
+		delete(s.prefixCounts, k)
+	}
+	for k := range s.mEntries {
+		delete(s.mEntries, k)
+	}
+	for k := range s.mColors {
+		delete(s.mColors, k)
+	}
+	for k := range s.prefixColors {
+		delete(s.prefixColors, k)
+	}
+	for k := range s.prefixDepths {
+		delete(s.prefixDepths, k)
+	}
+	for k := range s.prefixBursts {
+		delete(s.prefixBursts, k)
+	}
+	for k := range s.prefixBytes {
+		delete(s.prefixBytes, k)
+	}
+	for k := range s.prefixDeltas {
+		delete(s.prefixDeltas, k)
+	}
+	for k := range s.prefixMembers {
+		delete(s.prefixMembers, k)
+	}
+	for k := range s.prefixLastLines {
+		delete(s.prefixLastLines, k)
+	}
+	for k := range s.prefixFirstIntervalLines {
+		delete(s.prefixFirstIntervalLines, k)
+	}
+	for k, _ := range s.prefixStats {
+		// this will leak objects that were going to be gc'd anyway
+		// on the order of display cycles (hundreds not millions)
+		//prefixRecycleCount++
+		//recycleWordStats(stats)
+		delete(s.prefixStats, k)
+	}
+	//for k, _ := range s.prefixHistoryBufs {
+	//	//putRingBuffer(buf)
+	//	delete(s.prefixHistoryBufs, k)
+	//}
+	for k, buf := range s.prefixHistorAggregateBufs {
+		poolAccumulator(buf)
+		delete(s.prefixHistorAggregateBufs, k)
+	}
+}
+
+//var prefixRecycleCount = 0
+
+/*
+	After much profiling and optimizing, this is the most intense method of the whole tool.
+	Aggregate information is gathered here live each display cycle for accuracy. The whole
+	list of ips is never fully swept thanks to the prefix membership map maintained on
+	insert/delete. The ip prefixes are swept and their members iterated over for aggregates.
+	Optimizations that avoid this per-display summation have been rife with inaccuracies from
+	various sources of logical failures.
+*/
+// This is where processing starts to show up in profiles :(
+// This also breaks inadequate locking models... ask me how I know :(
+// Even after refactoring and sharing print routines, this is still
+// long and terrible because its performing a magic trick of aggregating
+// group info across ips. Using the topN/heap approach and narrowing to 10
+// makes it doable
+func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
+	defer m.groupTracker.Reset()
+
+	scratch := m.ipScratch // caller resets ipScratch
+	prefixGroups := scratch.prefixMembers
+	sortedGroups, selectedGroup := m.sortedIpGroups()
+
+	// Sort the slice by intervalCount in descending order
+	// use peak group membership as the primary sort and then
+	// do a secondary sort between the peak/non-peak by intervalCount
+	sort.Slice(sortedGroups, func(i, j int) bool {
+		if sortedGroups[i].countPlusFirst == sortedGroups[j].countPlusFirst {
+			return sortedGroups[i].prefix < sortedGroups[j].prefix
+		}
+		return sortedGroups[i].countPlusFirst > sortedGroups[j].countPlusFirst
+	})
+
+	// Chop and only use the top 10 entries
+	// TODO: what if peak > 10? Let 10 be configurable?
+	if len(sortedGroups) > 12 {
+		sortedGroups = sortedGroups[:12]
+		if selectedGroup != nil {
+			found := false
+			for _, g := range sortedGroups {
+				if g.prefix == selectedGroup.prefix {
+					found = true
+					break
+				}
+			}
+			if !found {
+				sortedGroups = append(sortedGroups, *selectedGroup)
+			}
+		}
+	}
+
+	// Make a map of <15 prefixes we care about to avoid a linear probe for membership in the following loop
+	//groupPrefixes := make(map[string]struct{}, 20)
+	//for _, group := range sortedGroups {
+	//	groupPrefixes[group.prefix] = struct{}{}
+	//}
+
+	// POST CUT!!!! only <15 in sortedGroups now, whew
+	// now that we're the top 10 or so, get the expensive or niche data
+	//for ipAddr, stats := range m.wordFrequency {
+	//if _, ok := groupPrefixes[stats.source.ipPrefix]; !ok {
+	//	continue
+	//}
+	////prefix := stats.source.ipPrefix
+	//for _, prefix := range m.ipScratch.ActivePrefixes(15) {
+	for _, prefixMarker := range sortedGroups {
+		prefix := prefixMarker.prefix
+		for _, ipAddr := range m.ipScratch.ActivePrefixMembers(prefix) {
+			stats := m.wordFrequency[ipAddr]
+			switch PattyGraph.tabViewIndexKey {
+			// burstiness was worse before it was a cached value
+			case 0:
+				// burstiness
+				scratch.prefixBursts[prefix] += stats.burstiness()
+			case 3:
+				//secondaryKeyOut.WriteString(fmt.Sprintf("%5d%%", int(stats.agentDeltaMetric*100)))
+				scratch.prefixDeltas[prefix] += stats.agentDeltaMetric
+				//secondaryString = fmt.Sprintf("%5d%%", int(float64(scratch.prefixDeltas[group.prefix])/float64(scratch.prefixMembers[group.prefix]))*100)
+			case 5:
+				// burstiness
+				scratch.prefixBytes[prefix] += stats.bytes
+			}
+
+			scratch.mEntries[ipAddr] = stats.count
+
+			if scratch.prefixFirstLines[prefix] == "" {
+				scratch.prefixFirstLines[prefix] = stats.source.logLine
+			}
+			if stats.lastLogLine != "" {
+				scratch.prefixLastLines[prefix] = stats.lastLogLine
+			}
+			if scratch.prefixFirstIntervalLines[prefix] == "" && stats.firstIntervalLogLine != "" {
+				scratch.prefixFirstIntervalLines[prefix] = stats.firstIntervalLogLine
+			}
+
+			if stats.source.captureColor != "" && scratch.mColors[ipAddr] == "" {
+				scratch.mColors[ipAddr] = stats.source.captureColor
+				if _, exists := scratch.prefixColors[prefix]; !exists {
+					scratch.prefixColors[prefix] = stats.source.captureColor
+				}
+			}
+			// Minimum info needed. Expensive info is processed later post-cut
+			scratch.prefixMembers[prefix] += 1
+			src := stats.historyBuf
+			scratch.prefixDepths[prefix] = max(scratch.prefixDepths[prefix], src.Len())
+			agg, exists := scratch.prefixHistorAggregateBufs[prefix]
+			if !exists {
+				scratch.prefixHistorAggregateBufs[prefix] = accumulatorFor(src)
+			} else {
+				agg.MergeFromRing(src)
+			}
+		}
+	}
+
+	var result = strings.Builder{}
+	result.Grow(10 * m.displayWidth)
+	var printedEntries []string
+	// Print the sorted results
+	selectedMatcherColor := matcherSelectionColor()
+	iCount := m.pushIntervalCount
+	if iCount > DefaultHistoryDepth {
+		iCount = DefaultHistoryDepth
+	}
+	// the printing below could be better but this is clear and works
+	// print prefix's first
+	// TODO: make this use writeMatchedEntry
+	for _, group := range sortedGroups {
+		if prefixGroups[group.prefix] < peakIpThreshold {
+			continue
+		}
+		var secondaryString string
+		// Some of this is an estimation and it can't really be pulled out bc its a lot of 2nd level derived data.
+		switch PattyGraph.tabViewIndexKey {
+		case 0:
+			// burstiness
+			secondaryString = fmt.Sprintf("%6.2f", float64(scratch.prefixBursts[group.prefix])/float64(scratch.prefixMembers[group.prefix]))
+		case 1:
+			// countPlusFirst
+			secondaryString = fmt.Sprintf("%6d", group.countPlusFirst)
+		case 2:
+			secondaryString = fmt.Sprintf("[%d]", scratch.prefixDepths[group.prefix])
+		case 3:
+			//secondaryKeyOut.WriteString(fmt.Sprintf("%5d%%", int(stats.agentDeltaMetric*100)))
+			secondaryString = fmt.Sprintf("%5d%%", int(100*scratch.prefixDeltas[group.prefix]/float64(scratch.prefixMembers[group.prefix])))
+		case 4:
+			//secondaryString = fmt.Sprintf("%-6s", miniReverseSparklineFromArray(*scratch.prefixHistoryBufs[group.prefix].ReverseSlice()))
+			secondaryString = fmt.Sprintf("%-6s", miniReverseSparklineFromArray(scratch.prefixHistorAggregateBufs[group.prefix].ReverseSlice()))
+		case 5:
+			// Bytes this interval
+			secondaryString = fmt.Sprintf("%6s", formatBytes64(scratch.prefixBytes[group.prefix]))
+		}
+
+		groupString := fmt.Sprintf("%s*.*(%d)", group.prefix, prefixGroups[group.prefix])
+		// TODO: is this leaking instances?
+		fakeStat := &WordStats{
+			historyBuf: &ringBuffer{},
+			//historyBuf: scratch.prefixHistorAggregateBufs[group.prefix].ringClone(),
+			//historyBuf:  scratch.prefixHistoryBufs[group.prefix],
+			forcedColor: scratch.prefixColors[group.prefix],
+			lastStatus:  "200",
+		}
+		//fakeStat := blankWordStats()
+		//fakeStat.forcedColor = scratch.prefixColors[group.prefix]
+		//fakeStat.lastStatus = "200"
+		scratch.prefixHistorAggregateBufs[group.prefix].cloneInto(fakeStat.historyBuf)
+		fakeEntry := wordEntry{
+			key:  group.prefix,
+			word: groupString,
+			stat: fakeStat,
+		}
+		result.WriteString(m.writeMatchedEntry(&fakeEntry,
+			selectedMatcherColor,
+			pattyMonoColorForInt(scratch.prefixDepths[group.prefix]),
+			secondaryString))
+
+		printedEntries = append(printedEntries, group.prefix)
+		//recycleWordStats(fakeStat)
+	}
+	// could consolidate with the above, but its only 10 entries, figure it out later.
+	// making faux WordStats & lineSource for displayString needs later
+	for _, group := range sortedGroups {
+		//fauxSource := &lineSource{
+		//	captureColor: scratch.prefixColors[group.prefix],
+		//	logLine:      scratch.prefixFirstLines[group.prefix],
+		//}
+		//groupCount := group.count
+		//firstHistory := 0
+		//if scratch.prefixHistoryBufs[group.prefix] != nil && scratch.prefixHistoryBufs[group.prefix].Len() > 0 {
+		//	//firstHistory = scratch.prefixHistoryBufs[group.prefix].nFlux(fluxDepth)
+		//	firstHistory = scratch.prefixHistoryBufs[group.prefix].Latest()
+		//}
+		//nws := blankWordStats()
+		//nws := &WordStats{
+		//	historyBuf: &ringBuffer{},
+		//	//source:     &lineSource{},
+		//}
+		nwsBuf := &ringBuffer{}
+		ls := &lineSource{}
+		ls.captureColor = scratch.prefixColors[group.prefix]
+		ls.logLine = scratch.prefixFirstLines[group.prefix]
+		nws := &WordStats{
+			count: group.count,
+			//historyBuf: scratch.prefixHistorAggregateBufs[group.prefix].ringClone(), // needs ringBuffer copy instead
+			historyBuf:           nwsBuf, // needs ringBuffer copy instead
+			firstIntervalLogLine: scratch.prefixFirstIntervalLines[group.prefix],
+			lastLogLine:          scratch.prefixLastLines[group.prefix],
+			forcedColor:          scratch.prefixColors[group.prefix],
+			primeFlux:            group.countPlusFirst,
+			source:               ls,
+		}
+		scratch.prefixHistorAggregateBufs[group.prefix].cloneInto(nwsBuf)
+		scratch.prefixStats[group.prefix] = nws
+	}
+	return result.String(), printedEntries
+}
+
+func (m *InterestingWordMatcher) sortedIpGroups() ([]prefixCount, *prefixCount) {
+	scratch := m.ipScratch // caller resets ipScratch
+
+	// GOLD STANDARD BRUTE FORCE THAT ALWAYS WORKS
+	// optimizations must simulate at least this much for working subsets.
+	//for _, stats := range m.wordFrequency {
+	//	prefix := stats.source.ipPrefix
+	//	scratch.prefixFirstPlusCounts[prefix] += stats.primeFlux
+	//	scratch.prefixCounts[prefix] += stats.count
+	//}
+	for _, prefix := range m.ipScratch.ActivePrefixes() { // sortedIpGroups
+		for _, ip := range m.ipScratch.ActivePrefixMembers(prefix) { // sortedIpGroups
+			stats, ok := m.wordFrequency[ip]
+			if !ok {
+				continue
+			}
+			scratch.prefixFirstPlusCounts[prefix] += stats.primeFlux
+			scratch.prefixCounts[prefix] += stats.count
+		}
+	}
+
+	var selectedGroup *prefixCount
+	groupTest := ""
+	if PattyGraph.selectedInterestingMatcher == m {
+		if m.selectedKey != "" {
+			groupTest = m.selectedKey
+		}
+	}
+
+	// scratch.prefixCounts can be thousands of entries. Cutting it down asap is important
+	for prefix, countPlusFirst := range scratch.prefixFirstPlusCounts {
+		//count := scratch.prefixCounts[prefix]
+		if m.groupTracker.ShouldConsider(countPlusFirst) || prefix == groupTest {
+			newCount := prefixCount{prefix,
+				countPlusFirst,
+				scratch.prefixCounts[prefix]}
+			if prefix == groupTest {
+				selectedGroup = &newCount // pick off selection to add back in later if needed
+			}
+			m.groupTracker.MaybeAdd(newCount)
+		}
+	}
+	// sortedGroups now has TopN Sort size: 15
+	return m.groupTracker.Top(), selectedGroup
+}
+
+// This has been left mostly un-optimized. Logic is a little messy but its correct and it never shows up on profiles
+// Consolidate printing logic makes this even more uninteresting in the grand scheme (displayMatched and ipGroups
+// are far worse
+func (m *InterestingWordMatcher) displayPeakWords() (string, []string) {
+	if len(m.peakWords) == 0 {
+		return "", nil
+	}
+	defer m.peakBuilder.Reset()
+	// Collect words and their ratios
+	entries := make([]wordEntry, 0, len(m.peakWords))
+	for _, word := range m.peakWords {
+		count := 0
+		if stat, ok := m.wordFrequency[word]; ok && stat != nil {
+			count = stat.historyTotal()
+		}
+		entries = append(entries, wordEntry{word: word, count: count, stat: m.wordFrequency[word]})
+	}
+
+	// Sort entries by ratio in descending order
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].count > entries[j].count
+	})
+
+	// Build the result string from sorted entries
+	result := m.peakBuilder
+	var printedEntries []string
+	nDenom := m.normalizedDenominator()
+	selectedMatcherColor := matcherSelectionColor()
+
+	for _, entry := range entries {
+		// hugely simplified by refactoring and calling same entry printing
+
+		secondaryInfo := m.secondaryEntryMetric(entry.stat, nDenom)
+		result.WriteString(m.writeMatchedEntry(&entry, selectedMatcherColor, PattyOrange, secondaryInfo))
+		printedEntries = append(printedEntries, entry.word)
+	}
+	return result.String(), printedEntries
+}
+
+// TODO: Feels like its either too much or not going far enough?
+//
+//	Supposed to be a lightweight wrapper on WordStats for sorting.
+//	Was probably more important when it was processing entire word lists.
+type wordEntry struct {
+	word       string
+	key        string
+	count      int // really the underlying current + history[0]
+	stat       *WordStats
+	hasCapture bool
+}
+
+func (m *InterestingWordMatcher) selected() bool {
+	return PattyGraph.selectedInterestingMatcher == m
+}
+
+func (m *InterestingWordMatcher) asInlineCommand() string {
+	return ""
+}
+
+//var printedEntriesScratch []string = make([]string, InterestingWordListSize*2)
+
+// THIS was THE HOTTEST HOT PATH until it was optimized and displayIpGroups took that title.
+// Performance here was gained by cutting the entire list down to a manageable size asap.
+func (m *InterestingWordMatcher) displayMatched() string {
+	defer m.matchedBuilder.Reset()
+	defer m.topTracker.Reset()
+
+	entries := m.topWordEntries()
+	// Sort entries
+	// The idea is to
+	//    * primary sort on peakWordEntry.countPlusFirst
+	//    * secondary grouped by color
+	//    * lastly keep things alphabetical so they
+	//      don't jump around needlessly within the same grouping
+	//sort.Slice(entries, func(i, j int) bool {
+	//	if entries[i].count == entries[j].count {
+	//		// Primary sort: Entries with captureColor come before...
+	//		if entries[i].hasCapture != entries[j].hasCapture {
+	//			return entries[i].hasCapture
+	//		}
+	//		// Secondary sort: Alphabetical order of words within grouping
+	//		return entries[i].word < entries[j].word
+	//	}
+	//	// Primary Sort by peakWordEntry.countPlusFirst descending
+	//	return entries[i].count > entries[j].count
+	//})
+	// efficient redo of the above:
+	sort.Slice(entries, func(i, j int) bool {
+		ci, cj := entries[i].count, entries[j].count
+		if ci != cj {
+			return ci > cj
+		}
+		hi, hj := entries[i].hasCapture, entries[j].hasCapture
+		if hi != hj {
+			return hi // true < false in Go
+		}
+		return entries[i].word < entries[j].word
+	})
+
+	result := m.matchedBuilder
+	printedCount := 0
+	// ***** Title logLine *****
+	extra := fmt.Sprintf("(%s)", strings.TrimSpace(formatCounts(len(m.wordFrequency))))
+	result.WriteString(fmt.Sprintf(m.fullTitleFormat, m.mName, extra))
+
+	// printedEntries is a cache of what logical key was responsible for what was actually printed
+	// in what order so that later when that key is "selected", it is printedEntries that is really
+	// getting selected from, not anything displayed (markup + secondary)
+	printedEntries := m.printedEntriesScratch[:0]
+
+	if m.ipScratch != nil {
+		resultString, groupEntries := m.displayIpGroups()
+		result.WriteString(resultString)
+		printedEntries = append(printedEntries, groupEntries...)
+	}
+	resultString, peakEntries := m.displayPeakWords()
+	result.WriteString(resultString)
+	printedEntries = append(printedEntries, peakEntries...)
+
+	intervalCount := m.pushIntervalCount
+	if intervalCount > DefaultHistoryDepth {
+		intervalCount = DefaultHistoryDepth
+	}
+	listEntryLimit := len(m.peakWordsSet) + InterestingWordListSize
+	// invariant for this call that's best done outside the following loop
+	nDenom := max(1, m.normalizedDenominator())
+	selectedMatcherColor := matcherSelectionColor()
+
+	for _, entry := range entries {
+		if !m.peakWordsSet[entry.word] { // skip peak words since they were covered in displayPeakWords
+			result.WriteString(m.writeMatchedEntry(
+				&entry,
+				selectedMatcherColor,
+				entry.stat.pattyMonoColor(),
+				m.secondaryEntryMetric(entry.stat, nDenom)))
+			printedEntries = append(printedEntries, entry.word)
+			printedCount++
+			if printedCount >= listEntryLimit {
+				break
+			}
+		}
+	}
+	m.currentListing = printedEntries
+	return result.String()
+}
+
+// There's some battling lrus here due to code evolution. The overhead is minimal so I left it.
+// Using heap/lru to cut down the number of entries to process from thousands to <200 was a huge win
+func (m *InterestingWordMatcher) topWordEntries() []wordEntry {
+	// caller resets topTracker!
+	// h, limit and the ipScratch test have all been pulled out and logic is repeated below all for performance reasons
+	h := m.topTracker.h
+	limit := m.topTracker.limit
+	scratch := m.ipScratch
+	topList := m.lruTracker.TopN(110)
+	if scratch != nil {
+		// Pre-allocate entries and populate it
+		scratch.Clear()
+		// IPS & GROUPS HERE
+		//for word, stats := range m.wordFrequency {
+		for _, entry := range topList {
+			word := entry.key
+			stats := m.wordFrequency[word]
+			// pretty sure these aren't needed
+			//if stats == nil {
+			//	// its been timed out!
+			//	continue
+			//}
+
+			// list ordering is based on peakWordEntry.countPlusFirst order
+			countPlusFirst := stats.primeFlux
+			// ips are low countPlusFirst entities, augment countPlusFirst with burstiness and delta
+			// so THE most interesting are at the top
+			// ipScratch specific stuff start
+			if countPlusFirst > 8 {
+				// scale current + last by these? still not quite right
+				// delta is also part of burstiness but its getting double represented anyway
+				countPlusFirst += int(stats.burstiness()*100) + int(stats.agentDeltaMetric*10)
+			}
+			// ShouldConsider() logic pulled out and inlined here
+			if len(h) < limit || countPlusFirst > h[0].count {
+				// Pulling up ShouldConsider logic and making MaybeForSureAdd dumber
+				// and assume these checks already passed
+				m.topTracker.MaybeForSureAdd(wordEntry{
+					word:       word,
+					count:      countPlusFirst,
+					stat:       stats,
+					hasCapture: stats.source.captureColor != "",
+				})
+			}
+		}
+	} else {
+		// WORDS & REFS GO HERE
+		// same as above but without the ipScratch and ip group computation
+		//for word, stats := range m.wordFrequency {
+		for _, entry := range topList {
+			word := entry.key
+			stats := m.wordFrequency[word]
+			// pretty sure these aren't needed
+			//if stats == nil {
+			//	// its been timed out!
+			//	continue
+			//}
+			countPlusFirst := stats.primeFlux
+			// Pulling up ShouldConsider logic and making MaybeForSureAdd dumber and assume these checks already passed
+			// ShouldConsider() logic pulled out and inlined here
+			if len(h) < limit || countPlusFirst > h[0].count {
+				// assumes above condition already passed
+				m.topTracker.MaybeForSureAdd(wordEntry{
+					word:       word,
+					count:      countPlusFirst,
+					stat:       stats,
+					hasCapture: stats.source.captureColor != "",
+				})
+			}
+
+		}
+	}
+	// Cut the list of thousands of entries to ~100
+	entries := m.topTracker.Top()
+	return entries
+}
+
+func (m *InterestingWordMatcher) writeMatchedEntry(entry *wordEntry, selectedMatcherColor, baseColor, secondaryInfo string) string {
+	stat := entry.stat
+
+	// Base colors
+	color := baseColor
+	valueColor := baseColor
+
+	// Override with captureColor if available
+	if c := stat.captureColor(); c != "" {
+		color = c
+	}
+
+	// Apply selection styling
+	highlight := ""
+	color, valueColor, highlight = m.setSelectionColors(entry, color, valueColor, "", selectedMatcherColor)
+
+	// Apply error styling
+	highlight, color = m.setErrorColors(entry, highlight, color)
+
+	// Final color tag with highlight, if needed
+	if highlight != "" {
+		color = color + ":" + highlight
+	}
+
+	return fmt.Sprintf(m.fullFormat,
+		color,
+		stat.allHistoryIndicator(),
+		entry.word,
+		valueColor,
+		secondaryInfo,
+	)
+}
+
+func (m *InterestingWordMatcher) setErrorColors(entry *wordEntry, newHighlight string, color string) (string, string) {
+	if entry.stat.lastStatus[0] == '4' || entry.stat.lastStatus[0] == '5' {
+		if m.selected() && entry.word == m.selectionKey() {
+			newHighlight = PattyErrorSelection
+			color = "white"
+		} else {
+			newHighlight = PattyErrorHighlight
+			color = "black"
+		}
+		if isLowishHistory(color) {
+			color = "black"
+		}
+	}
+	return newHighlight, color
+}
+
+func (m *InterestingWordMatcher) setSelectionColors(entry *wordEntry, color string, valueColor string, newHighlight string, selectedMatcherColor string) (string, string, string) {
+	if m.selected() && (entry.word == m.selectionKey() || (entry.key != "" && entry.key == m.selectionKey())) {
+		if isLowHistory(color) {
+			color = "black"
+		}
+		if isLowHistory(valueColor) {
+			valueColor = "black"
+		}
+		newHighlight = PattyHighlight
+	} else if selectedMatcherColor != "" && selectedMatcherColor == color {
+		newHighlight = PattySecondaryHighlight
+	}
+	return color, valueColor, newHighlight
+}
+
+func (m *InterestingWordMatcher) selectionKey() string {
+	return m.selectedKey
+}
+
+func (m *InterestingWordMatcher) selectDisplayItem(selectionIndex int) {
+	m.selectedGraphCache = ""
+	oldState := PattyGraph.selectedInterestingMatcher
+	if m != oldState && oldState != nil {
+		oldState.selectedKey = ""
+	}
+
+	newKey := ""
+	if selectionIndex >= 0 && selectionIndex < len(m.currentListing) {
+		newKey = m.currentListing[selectionIndex]
+	}
+	if m == oldState && m.selectedKey == newKey {
+		m.selectedKey = ""
+	} else {
+		m.selectedKey = newKey
+	}
+
+	if m.selectedKey == "" {
+		PattyGraph.selectedInterestingMatcher = nil
+	} else {
+		PattyGraph.selectedInterestingMatcher = m
+	}
+}
+
+// secondaryEntryMetric is the extra info displayed on the right side of every entry
+// TODO: Tab cycles through current, countPlusFirst+last, historyDepth
+func (m *InterestingWordMatcher) secondaryEntryMetric(stats *WordStats, nDenom float64) string {
+	switch PattyGraph.tabViewIndexKey {
+	case 0:
+		if m.ipScratch != nil {
+			fullStat := stats.burstiness()
+			//secondaryKeyBuilder.WriteString(fmt.Sprintf("%6.2f", fullStat))
+			return fmt.Sprintf("%6.2f", fullStat)
+		} else {
+			entryStatNormalized := stats.normalized()
+			return fmt.Sprintf("%6.2f", entryStatNormalized/nDenom)
+		}
+	case 1:
+		fullStat := stats.primeFlux
+		return fmt.Sprintf("%6d", fullStat)
+	case 2:
+		fullStat := stats.historyLength()
+		return fmt.Sprintf("  [%d]", fullStat)
+	case 3:
+		return fmt.Sprintf("%5d%%", int(stats.agentDeltaMetric*100))
+	case 4:
+		return fmt.Sprintf("%-6s", m.miniSparkForStats(stats))
+	case 5:
+		return fmt.Sprintf("%6s", formatBytes64(stats.bytes))
+	default: // can't happen bc PattyGraph.tabViewIndexKey is never > 4
+		return ""
+	}
+}
+
+func (m *InterestingWordMatcher) miniSparkForStats(stats *WordStats) string { // EXPENSIVE
+	return miniReverseSparklineFromArray(stats.reversedHistorySlice()) // EXPENSIVE
+}
+
+func isInteresting(word string) bool {
+	// Skip words shorter than minWordLength or those in the commonWords set
+	if len(word) < DefaultMinWordLength || commonWords[word] {
+		return false
+	}
+	// Check if the word is entirely numeric
+	isNumeric := true
+	for _, ch := range word {
+		if ch != '.' && ch != 'E' && ch != '_' && (ch < '0' || ch > '9') {
+			isNumeric = false
+			break
+		}
+	}
+	if isNumeric {
+		return false
+	}
+
+	return true
+}
+
+func (m *InterestingWordMatcher) migrateIps() {
+	localMax := ""
+	lastCount := 0
+	for word, stats := range m.wordFrequency {
+		if stats.historyLength() > 5 && stats.count > lastCount && stats.source.captureColor == "" {
+			lastCount = stats.count
+			localMax = word
+		}
+	}
+
+	// Pretty sure interval lines comparison masks the lastMonitorMax comparison
+	//if lastCount == 0 || lastCount < (lastMonitorMax+lastLastMonitorMax)/2 || lastCount < PattyGraph.intervalLines/10 {
+	if lastCount == 0 || float64(lastCount) < lastMonitorMaxBuf.nFluxAvg(fluxDepth) || lastCount < PattyGraph.intervalLines/10 {
+		return
+	}
+
+	for _, matcher := range PattyGraph.matchers {
+		if matcher.matcherName() == localMax {
+			return
+		}
+	}
+
+	topIpMatcher := StartsWithMatcher(localMax, []string{localMax})
+	topIpMatcher.intervalCount = lastCount
+	topIpMatcher.history = m.wordFrequency[localMax].historySlice()
+
+	PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, topIpMatcher)
+	botsMigrated++
+	//m.wordFrequency[localMax].spawned = true
+}
+
+// purgePeakWords If isPeak gets used, this will be more work than dropping the data
+func (m *InterestingWordMatcher) purgePeakWords() {
+	m.peakWords = []string{}
+	m.peakWordsSet = make(map[string]bool)
+}
+
+//	func (m *InterestingWordMatcher) purgeHistory() {
+//		m.wordFrequency = make(map[string]*WordStats, 1000)
+//	}
+
+func (m *InterestingWordMatcher) asMatcher() *Matcher {
+	return nil
+}
+
+// Instead of subclassing for the simple cases, inject behavior function pointers for specific behavior overrides
+func WordMatcherFactory(matcherType string) *InterestingWordMatcher {
+	wordsPurgeInterval, refsPurgeInterval, ipsPurgeInterval := lookupPurgeIntervals(pattyPushFactor)
+	switch matcherType {
+	case "words":
+		word := NewInterestingWordMatcher(matcherType, wordsPurgeInterval)
+		word.lineParser = wordsParseLine
+		word.lineTokenizer = tokensForWords
+		return word
+	case "refs":
+		refs := NewInterestingWordMatcher(matcherType, refsPurgeInterval)
+		refs.lineParser = refsParseLineFast
+		refs.lineTokenizer = tokensForRefs
+		return refs
+	case "ips":
+		ips := NewInterestingWordMatcher(matcherType, ipsPurgeInterval)
+		ips.lineParser = ipsParseLine
+		ips.lineTokenizer = tokensForIps
+		ips.displayWidth -= 3
+		ips.titleFormat = fmt.Sprintf("%%-%ds", ips.displayWidth-19)
+		ips.fullTitleFormat = "[#F4F4F4]Interesting " + ips.titleFormat + "[#999999]%6.6s[default:-]\n"
+
+		ips.groupTracker = NewTopPrefixTracker(10)
+		ips.ensureFullFormat()
+		ips.ipScratch = createIpScratch()
+		return ips
+	default:
+		log.Fatalf("Unknown wordMatcher type: %s", matcherType)
+	}
+	return nil
+}
+
+func createIpScratch() *ipGroupScratch {
+	const startingMapSize = 4096
+	const groupMapSize = 32
+	return &ipGroupScratch{
+		prefixCounts:          make(map[string]int, startingMapSize),
+		prefixFirstPlusCounts: make(map[string]int, startingMapSize),
+
+		mEntries:      make(map[string]int, groupMapSize),
+		mColors:       make(map[string]string, groupMapSize),
+		prefixColors:  make(map[string]string, groupMapSize),
+		prefixDepths:  make(map[string]int, groupMapSize),
+		prefixBursts:  make(map[string]float64, groupMapSize),
+		prefixBytes:   make(map[string]uint64, groupMapSize),
+		prefixDeltas:  make(map[string]float64, groupMapSize),
+		prefixMembers: make(map[string]int, groupMapSize),
+		//prefixHistoryBufs:        make(map[string]*ringBuffer, groupMapSize),
+		prefixHistorAggregateBufs: make(map[string]*ringSeriesAccumulator, groupMapSize),
+		prefixStats:               make(map[string]*WordStats, groupMapSize),
+		prefixFirstLines:          make(map[string]string, groupMapSize),
+		prefixLastLines:           make(map[string]string, groupMapSize),
+		prefixFirstIntervalLines:  make(map[string]string, groupMapSize),
+
+		prefixToIPs:        make(map[string]map[string]struct{}, groupMapSize),
+		activePrefixes:     make(map[string]struct{}, groupMapSize),
+		activePrefixCounts: make(map[string]int, startingMapSize),
+	}
+}
+
+// should rename to something about periodic maintenance.
+func (m *InterestingWordMatcher) compactFrequencyMap() {
+	newLength := len(m.wordFrequency)
+	fresh := make(map[string]*WordStats, newLength)
+	for key, val := range m.wordFrequency {
+		fresh[key] = val
+	}
+	m.wordFrequency = fresh
+
+	m.lruTracker.EvictBottomPercent(10)
+}
+
+// shared formatting for all word entries, must be readjusted if displayWidth changes
+func (m *InterestingWordMatcher) ensureFullFormat() {
+	keyFormat := fmt.Sprintf("%%-%d.%ds", m.displayWidth-8, m.displayWidth-8)
+	m.fullFormat = "[%s]%s" + keyFormat + "[%s]%6.6s[-:-]\n"
+}
+
+// Click value selection in the spark graph area.
+func (m *InterestingWordMatcher) selectedHistoryAt(idx int) int {
+	key := m.selectedKey
+	if key != "" {
+		if stats, exists := m.wordFrequency[key]; exists {
+			if idx < stats.historyLength() {
+				return stats.historyAt(stats.historyLength() - idx - 1)
+			}
+			//} else if h, exists2 := m.ipScratch.prefixHistoryBufs[key]; exists2 { // IP Groups aggregated selection
+			//	if idx < h.Len() {
+			//		return h.At(h.Len() - 1 - idx)
+			//	}
+		} else if h, exists2 := m.ipScratch.prefixHistorAggregateBufs[key]; exists2 { // IP Groups aggregated selection
+			if idx < h.Len() {
+				return h.unsafeAt(h.Len() - 1 - idx)
+			}
+		}
+	}
+	return 0
+}
+
+type prefixCount struct {
+	prefix         string
+	countPlusFirst int
+	count          int
+}
+
+// Uses heap calls and interfaces, but its not nearly as critical as TopWordTracker, so its ok.
+func NewTopPrefixTracker(maxSize int) *TopPrefixTracker {
+	return &TopPrefixTracker{
+		limit: maxSize,
+	}
+}
+
+// prefixGroup specalization to avoid interface overhead
+type TopPrefixTracker struct {
+	limit int
+	h     prefixCountHeap
+	buf   []prefixCount
+}
+
+type prefixCountHeap []prefixCount
+
+func (h prefixCountHeap) Len() int           { return len(h) }
+func (h prefixCountHeap) Less(i, j int) bool { return h[i].countPlusFirst < h[j].countPlusFirst }
+func (h prefixCountHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+
+func (h *prefixCountHeap) Push(x interface{}) {
+	*h = append(*h, x.(prefixCount))
+}
+
+func (h *prefixCountHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
+func (t *TopPrefixTracker) ShouldConsider(newCount int) bool {
+	return len(t.h) < t.limit || newCount > t.h[0].countPlusFirst
+}
+func (t *TopPrefixTracker) MaybeAdd(entry prefixCount) {
+	if len(t.h) < t.limit {
+		heap.Push(&t.h, entry)
+	} else if entry.countPlusFirst > t.h[0].countPlusFirst {
+		heap.Pop(&t.h)
+		heap.Push(&t.h, entry)
+	}
+}
+
+func (t *TopPrefixTracker) Reset() {
+	t.h = t.h[:0]
+}
+
+func (t *TopPrefixTracker) Top() []prefixCount {
+	if cap(t.buf) < len(t.h) {
+		t.buf = make([]prefixCount, 0, len(t.h))
+	}
+	result := t.buf[:0]
+	result = append(result, t.h...)
+	return result
+}
+
+// Raw, no heap library, no interface, all inlined go heap code
+// part of the hottest hot path
+type TopWordTracker struct {
+	limit int
+	h     []wordEntry // length ≤ limit, capacity == limit
+}
+
+func NewTopWordTracker(limit int) *TopWordTracker {
+	return &TopWordTracker{
+		h:     make([]wordEntry, 0, limit),
+		limit: limit,
+	}
+}
+
+func (t *TopWordTracker) Reset() {
+	t.h = t.h[:0]
+}
+
+func (t *TopWordTracker) Top() []wordEntry {
+	return t.h
+}
+
+// Manual push with heap invariant (min-heap). Very hot path
+// This assumes the caller has pre-met one of the two conditions:
+//
+//	1 Buffer is still filling up
+//	2 new entry for sure should be added bc the new entry has more counts
+func (t *TopWordTracker) MaybeForSureAdd(entry wordEntry) {
+	if len(t.h) < t.limit {
+		// Insert and percolate up
+		t.h = t.h[:len(t.h)+1] // manually grow length
+		t.up(len(t.h)-1, entry)
+	} else { //} if entry.count > t.h[0].count {
+		// Replace root and percolate down
+		t.down(0, entry)
+	}
+}
+
+//func (t *TopWordTracker) MaybeAdd(entry wordEntry) {
+//	if len(t.h) < t.limit {
+//		// Insert and percolate up
+//		t.h = t.h[:len(t.h)+1] // manually grow length
+//		t.up(len(t.h)-1, entry)
+//	} else if entry.count > t.h[0].count {
+//		// Replace root and percolate down
+//		t.down(0, entry)
+//	}
+//}
+
+func (t *TopWordTracker) up(pos int, entry wordEntry) {
+	h := t.h
+	for pos > 0 {
+		parent := (pos - 1) / 2
+		if entry.count >= h[parent].count {
+			break
+		}
+		h[pos] = h[parent]
+		pos = parent
+	}
+	h[pos] = entry
+}
+
+func (t *TopWordTracker) down(pos int, entry wordEntry) {
+	h := t.h
+	n := len(h)
+	for {
+		left := 2*pos + 1
+		if left >= n {
+			break
+		}
+		smallest := left
+		right := left + 1
+		if right < n && h[right].count < h[left].count {
+			smallest = right
+		}
+		if h[smallest].count >= entry.count {
+			break
+		}
+		h[pos] = h[smallest]
+		pos = smallest
+	}
+	h[pos] = entry
+}
+
+/////// new lru for words ///////
+
+type ScoredEntry struct {
+	key   string
+	score int
+}
+
+type ScoredLRUTracker struct {
+	limit int
+	index map[string]*list.Element
+	list  *list.List // Front = most recently seen, Back = least
+}
+
+func NewScoredLRUTracker(limit int) *ScoredLRUTracker {
+	return &ScoredLRUTracker{
+		limit: limit,
+		index: make(map[string]*list.Element, limit),
+		list:  list.New(),
+	}
+}
+func (t *ScoredLRUTracker) MarkSeen(key string, score int) {
+	if elem, ok := t.index[key]; ok {
+		entry := elem.Value.(*ScoredEntry)
+		entry.score = score
+		t.list.MoveToFront(elem)
+		return
+	}
+
+	// If full, check if the new score is worth tracking
+	if t.list.Len() >= t.limit {
+		back := t.list.Back()
+		if back != nil {
+			worst := back.Value.(*ScoredEntry)
+			if score <= worst.score {
+				return // New item isn't better than the worst one; skip
+			}
+			delete(t.index, worst.key)
+			t.list.Remove(back)
+		}
+	}
+
+	// Insert the new entry
+	entry := &ScoredEntry{key: key, score: score}
+	elem := t.list.PushFront(entry)
+	t.index[key] = elem
+}
+
+func (t *ScoredLRUTracker) Delete(key string) {
+	if elem, ok := t.index[key]; ok {
+		t.list.Remove(elem)
+		delete(t.index, key)
+	}
+}
+
+func (t *ScoredLRUTracker) TopN(n int) []ScoredEntry {
+	result := make([]ScoredEntry, 0, n)
+	count := 0
+	for e := t.list.Front(); e != nil && count < n; e = e.Next() {
+		result = append(result, *(e.Value.(*ScoredEntry)))
+		count++
+	}
+	return result
+}
+
+func (t *ScoredLRUTracker) EvictBelow(minScore int) {
+	for e := t.list.Back(); e != nil; {
+		prev := e.Prev()
+		entry := e.Value.(*ScoredEntry)
+		if entry.score >= minScore {
+			break
+		}
+		t.list.Remove(e)
+		delete(t.index, entry.key)
+		e = prev
+	}
+}
+func (t *ScoredLRUTracker) EvictBottomPercent(pct float64) {
+	if pct <= 0 || pct >= 1 {
+		return // Invalid percent
+	}
+	evictCount := int(float64(t.list.Len()) * pct)
+	if evictCount < 1 {
+		return
+	}
+
+	// Traverse from back (least recently seen)
+	for i := 0; i < evictCount; i++ {
+		elem := t.list.Back()
+		if elem == nil {
+			break
+		}
+		entry := elem.Value.(*ScoredEntry)
+		delete(t.index, entry.key)
+		t.list.Remove(elem)
+	}
+}
+
+const IpGroupActiveThreshold = 15
+
+func (s *ipGroupScratch) Add(ip, prefix string) {
+	ipSet, exists := s.prefixToIPs[prefix]
+	if !exists {
+		ipSet = make(map[string]struct{}, 10)
+		s.prefixToIPs[prefix] = ipSet
+	}
+	if _, seen := ipSet[ip]; !seen {
+		ipSet[ip] = struct{}{}
+		// bump the count
+		newCount := s.activePrefixCounts[prefix] + 1
+		s.activePrefixCounts[prefix] = newCount
+		// if we've just hit the threshold, mark active
+		if newCount == IpGroupActiveThreshold {
+			s.activePrefixes[prefix] = struct{}{}
+		}
+	}
+}
+
+func (s *ipGroupScratch) Add_old(ip string, prefix string) {
+	ipSet, exists := s.prefixToIPs[prefix]
+	if !exists {
+		ipSet = make(map[string]struct{}, 10)
+		s.prefixToIPs[prefix] = ipSet
+	}
+	ipSet[ip] = struct{}{}
+}
+func (s *ipGroupScratch) Remove(ip, prefix string) {
+	minSize := 15
+	if ipSet, ok := s.prefixToIPs[prefix]; ok {
+		if _, seen := ipSet[ip]; seen {
+			delete(ipSet, ip)
+			newCount := s.activePrefixCounts[prefix] - 1
+			if newCount <= 0 {
+				// no members → forget it entirely
+				delete(s.prefixToIPs, prefix)
+				delete(s.activePrefixCounts, prefix)
+				delete(s.activePrefixes, prefix)
+			} else {
+				s.activePrefixCounts[prefix] = newCount
+				// if we've fallen below the threshold, de-activate
+				if newCount == minSize-1 {
+					delete(s.activePrefixes, prefix)
+				}
+			}
+		}
+	}
+}
+
+// MUST be called when m.wordFrequency[word] is removed
+func (s *ipGroupScratch) Remove_old(ip string, prefix string) {
+	if ipSet, ok := s.prefixToIPs[prefix]; ok {
+		delete(ipSet, ip)
+		if len(ipSet) == 0 {
+			delete(s.prefixToIPs, prefix)
+		}
+	}
+}
+
+// Naive "single" threaded model lets this optimization be so simple minded
+var activePrefixScratch = make([]string, 0, 20)
+
+func (s *ipGroupScratch) ActivePrefixes() []string {
+	// we know this slice is only as big as the last ActivePrefixes call
+	if cap(activePrefixScratch) < len(s.activePrefixes) {
+		activePrefixScratch = make([]string, 0, len(s.activePrefixes))
+	}
+	result := activePrefixScratch[:0]
+
+	for prefix := range s.activePrefixes {
+		result = append(result, prefix)
+	}
+	s.activePrefixesCountMetric = len(result)
+	return result
+}
+
+//func (s *ipGroupScratch) ActivePrefixes(IpGroupActiveThreshold int) []string {
+//	//result := make([]string, 0, len(s.prefixToIPs))
+//	if cap(activePrefixScratch) < len(s.prefixToIPs) {
+//		activePrefixScratch = make([]string, 0, len(s.prefixToIPs)*2)
+//	}
+//	result := activePrefixScratch[:0]
+//
+//	for prefix, ipSet := range s.prefixToIPs {
+//		if len(ipSet) >= IpGroupActiveThreshold {
+//			result = append(result, prefix)
+//		}
+//	}
+//	return result
+//}
+
+var activeIpSetScratch = make([]string, 0, 20)
+
+func (s *ipGroupScratch) ActivePrefixMembers(prefix string) []string {
+	ipSet, ok := s.prefixToIPs[prefix]
+	if !ok {
+		return nil
+	}
+	if cap(activeIpSetScratch) < len(ipSet) {
+		activeIpSetScratch = make([]string, 0, len(ipSet)*2)
+	}
+	ips := activeIpSetScratch[:0]
+	for ip := range ipSet {
+		ips = append(ips, ip)
+	}
+	return ips
+}
+func (m *InterestingWordMatcher) updatePeakWordStats() {
+	if PattyGraph.intervalsCompleted < pattyGracePeriod {
+		return
+	}
+	count := len(m.peakWords)
+	m.peakWordCounts = append(m.peakWordCounts, count)
+	m.totalPeakCounts += count
+
+	if len(m.peakWordCounts) > 80 {
+		removed := m.peakWordCounts[0]
+		m.peakWordCounts = m.peakWordCounts[1:]
+		m.totalPeakCounts -= removed
+	}
+}
+func (m *InterestingWordMatcher) averagePeakWords() float64 {
+	if len(m.peakWordCounts) == 0 {
+		return 0
+	}
+	return float64(m.totalPeakCounts) / float64(len(m.peakWordCounts))
+}
+
+var poolNews uint64
+var poolGets uint64
+var poolReturns uint64
+var poolGetsMap = make(map[int]uint64, 20)
+var poolGetsPerMatcherMap = make(map[uint64]uint64, 20)
+var wordStatsPool = sync.Pool{
+	New: func() any {
+		poolNews++
+		return &WordStats{
+			historyBuf: &ringBuffer{},
+			source:     &lineSource{},
+		}
+	},
+}
+
+func blankWordStats() *WordStats {
+	poolGets++
+	ws := wordStatsPool.Get().(*WordStats)
+	return ws
+}
+func newWordStats() *WordStats {
+	poolGets++
+	ws := wordStatsPool.Get().(*WordStats)
+	src := ws.source
+	rb := ws.historyBuf
+	rb.Reset()
+	*ws = WordStats{
+		count:                 1,
+		primeFlux:             1,
+		historyBuf:            rb,
+		source:                src,
+		lastSeenTic:           logicalCycles,
+		agentTokensFromSource: currentLine.userAgentTokens,
+		lastStatus:            currentLine.respCode,
+	}
+	*src = lineSource{
+		ip:           currentLine.ip,
+		captureColor: currentLine.captureColor,
+		ipPrefix:     currentLine.ipPrefix,
+		logLine:      currentLine.logLine,
+		request:      currentLine.request,
+		respCode:     currentLine.respCode,
+		bytesValue:   currentLine.bytesValue,
+		referer:      currentLine.referer,
+	}
+	return ws
+}
+func repopulateWordStats(ws *WordStats) {
+	src := ws.source
+	rb := ws.historyBuf
+	rb.Reset()
+	*ws = WordStats{
+		count:                 1,
+		primeFlux:             1,
+		historyBuf:            rb,
+		source:                src,
+		lastSeenTic:           logicalCycles,
+		agentTokensFromSource: currentLine.userAgentTokens,
+		lastStatus:            currentLine.respCode,
+	}
+	*src = lineSource{
+		ip:           currentLine.ip,
+		captureColor: currentLine.captureColor,
+		ipPrefix:     currentLine.ipPrefix,
+		logLine:      currentLine.logLine,
+		request:      currentLine.request,
+		respCode:     currentLine.respCode,
+		bytesValue:   currentLine.bytesValue,
+		referer:      currentLine.referer,
+	}
+}
+
+func (ws *WordStats) Reset() {
+	if ws.historyBuf != nil {
+		ws.historyBuf.Reset()
+	} else {
+		ws.historyBuf = &ringBuffer{}
+	}
+	ws.agentTokensFromSource = nil
+	ws.source.captureColor = ""
+}
+
+func recycleWordStats(ws *WordStats) {
+	if ws == nil {
+		return
+	}
+	ws.Reset()
+	wordStatsPool.Put(ws)
+	poolReturns++
+}
