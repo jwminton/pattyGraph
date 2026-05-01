@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright 2026 Jasen Minton
+#
+# SPDX-License-Identifier: Apache-2.0
 
 # The name of your output binary
 APP_NAME="pattyGraph"
