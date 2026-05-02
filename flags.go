@@ -464,7 +464,7 @@ Layout:
 +----------------+---------------+---------------+----------+
 
 Example Expert Overlay (optional top right text overlay):
-  20 3000 80M@/{4:90.120.180}151.5
+  20 3000 80M@/{4:90.120.180}301.5
 Value Decomposition:
   20 - Max value seen in competing matchers (i.e. matchers above & including Bots)
   3000 - Max lines seen per interval
@@ -479,10 +479,11 @@ Value Decomposition:
    (Note: For the sliding window, the time scale above the sparkgraph will 
           highlight the corresponding tick for the sliding window's relative
           position)
-  {4:90.120.180} - Push factor and the resulting time in seconds entries are
-             allowed to live before another match for it must be seen or it 
-             is purged. Words, refs, ips timing respectively
-   15 - Grace factor
+   {4:90.120.180}
+      Push factor and resulting purge windows, in seconds, for Words, Refs,
+      and IPs respectively. If an entry is not seen again within its window,
+      it is purged.
+   30 - Grace factor
    1.5 - Scale for Peak Word determination
 `
 }
