@@ -258,7 +258,7 @@ Usage: ./pattyGraph [OPTIONS] [file_location]
   Terminal interface is clickable: matcher entries along the left are selectable as 
   are the interesting column entries, sparkline graphs can be clicked for value 
   inspection. Keyboard-driven actions can also be triggered via inline '!!!'
-  commands (see '--help inline''). Configuration files are a sequence of inline
+  commands (see '--help inline'). Configuration files are a sequence of inline
   commands read in prior to log data ingestion.
   
    Ctrl-Select - (Matcher on the left side) Toggles whether to print matched entries
