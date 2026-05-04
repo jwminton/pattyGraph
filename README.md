@@ -1,4 +1,3 @@
-```markdown
 # PattyGraph
 
 PattyGraph is a terminal-based, real-time access log analyzer for nginx-style logs. It highlights unusual or significant traffic patterns using sparklines, matchers, and ranked token/referrer/IP tables.
