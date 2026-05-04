@@ -68,7 +68,7 @@ See:
 ```
 
 ## Documentation
-(Planned and exiting)
+(Planned and existing)
 
 * Traffic texture model: `docs/traffic-texture.md`
 * UI interaction and layout: `docs/interactive-ui.md`
