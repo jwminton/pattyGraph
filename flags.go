@@ -4,7 +4,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -207,7 +206,7 @@ func parseArgs() *MonitorConfig {
 		}
 	}
 
-	args := flag.Args()
+	args := pflag.Args()
 	if len(args) > 0 {
 		mConf.filePath = args[0] // Use the first non-flag argument as the file
 	} else {
