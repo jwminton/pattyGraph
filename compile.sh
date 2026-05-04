@@ -7,7 +7,7 @@
 APP_NAME="pattyGraph"
 
 # Platforms you want to build for
-platforms=("linux/amd64" "darwin/amd64" "windows/amd64" "linux/arm64")
+platforms=("linux/amd64" "linux/arm64")
 
 LD_FLAGS='-s -w'
 
