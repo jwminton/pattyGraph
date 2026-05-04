@@ -25,7 +25,7 @@ Build all targets (writes into `dist/`):
 
 ```bash
 ./compile.sh
-```
+````
 
 Run (defaults to `./access.log` if no file is given):
 
