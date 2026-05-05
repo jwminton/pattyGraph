@@ -21,7 +21,7 @@ PattyGraph is a local terminal tool for analyzing nginx-style access logs. Repor
 
 - unsafe parsing behavior
 - crashes caused by malformed log input
-- startup/runtime configutation interpretation 
+- startup/runtime configuration interpretation 
 - build or dependency issues
 
 ## Supported Versions
