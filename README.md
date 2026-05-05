@@ -51,10 +51,13 @@ Helpful sub-help:
 
 ## TimedReplay (demo/testing/forensics)
 
-TimedReplay is a small companion command under `cmd/timedReplay` that replays nginx access-log lines with controlled timing. It can be used to replay a historical window so PattyGraph can “watch the past” as if it were live.
+TimedReplay is a small companion command under `cmd/timedReplay` that replays nginx access-log lines with controlled timing. It can be used to replay a historical window so PattyGraph can “watch the past” as if it were live. Typical use redirects timedReplay's stdout to a file that pattyGraph will then consume from another running session.
 
 ```bash
-go run ./cmd/timedReplay -file ./access.log -speed 20 -start 08:00:00 -end 09:30:00
+go run ./cmd/timedReplay/main.go -file ./access.1.log -speed 10 > ./replayed_access.log
+```
+```bash
+pattyGraph ./replayed_access.log
 ```
 
 ## Inline Commands
