@@ -4,7 +4,7 @@ PattyGraph is a terminal-based, real-time access log analyzer for nginx-style lo
 
 It’s designed for live ops use (tmux/screen) and forensics (replaying historical log windows), with a dense interactive display that helps you see traffic **shape** and how it changes over time.
 
-![PattyGraph terminal UI](docs/images/pattygraph_startup.png)
+![PattyGraph terminal UI](docs/images/pattyGraph-startup.png)
 
 ## Download
 
@@ -48,6 +48,17 @@ Helpful sub-help:
 ./dist/linux-amd64/pattyGraph --help inline
 ./dist/linux-amd64/pattyGraph --help colors
 ```
+
+## Visual Diagnosis
+
+![PattyGraph composite examples](docs/images/pattyGraph-states-2x2.png)
+
+At a glance, the scope and urgency of failures can be categorized. Starting from the top left:
+- **Normal Startup**: Maybe some errors but nothing persistent. No real pattern to the red error highlights
+- **Potentially bad clients**: More errors and there are some persistent IP's or IP ranges that are the source.
+- **Potentially bad deployment**: Errors are more related to the content being hit than the clients doing the requesting and the error spread may be wider, but upon investigation, common deployment characteristics can be seen
+- **Systemic error**: Service itself might be down or there is some fatal root error causing a system-wide issue
+
 
 ## TimedReplay (demo/testing/forensics)
 
