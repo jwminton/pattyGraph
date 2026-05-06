@@ -260,17 +260,20 @@ func prettyPrintLogLine(line, selectedKey, lineColor string) string {
 	return sparkBuilder.String()
 }
 
-// TODO: I have two different but core ways of tracking history, each grows the opposite of the other
+// There used to be two different but core ways of tracking history, each grew the
+// opposite of the other but each was handy at the time for different reasons.
 //
-//	This is one place it matters.
-func reversedCopy(arr []int) []int {
-	n := len(arr)
-	result := make([]int, n)
-	for i, v := range arr {
-		result[n-1-i] = v
-	}
-	return result
-}
+//	This is one place it mattered. No longer needed. Leaving this as evidence of what
+//  NOT to do. If you're in a position of needing a reversedCopy, something is going wrong
+//
+//func reversedCopy(arr []int) []int {
+//	n := len(arr)
+//	result := make([]int, n)
+//	for i, v := range arr {
+//		result[n-1-i] = v
+//	}
+//	return result
+//}
 
 func ipsParseLine() string {
 	return currentLine.ip
