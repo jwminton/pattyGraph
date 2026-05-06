@@ -53,7 +53,7 @@ Helpful sub-help:
 
 ![PattyGraph composite examples](docs/images/pattyGraph-states-2x2.png)
 
-At a glance, the scope and urgency of failures can be categorized. Starting from the top left:
+At a glance, the scope and urgency of failures can be categorized. Looking left to right, top row first: 
 - **Normal Startup**: Maybe some errors but nothing persistent. No real pattern to the red error highlights
 - **Potentially bad clients**: More errors and there are some persistent IP's or IP ranges that are the source.
 - **Potentially bad deployment**: Errors are more related to the content being hit than the clients doing the requesting and the error spread may be wider, but upon investigation, common deployment characteristics can be seen
