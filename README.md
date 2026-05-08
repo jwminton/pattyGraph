@@ -73,12 +73,14 @@ pattyGraph ./replayed_access.log
 
 ## Inline Commands
 
-Lines beginning with `!!!` are interpreted as commands rather than log lines. This is used for runtime control and for configuration files (a config file is just a sequence of inline commands).
+Lines beginning with `!!!` are interpreted as commands rather than log lines. This is used for runtime control and for configuration files (a config file is just a sequence of inline commands). 
 
 Example:
 
+Adds a new Matcher looking for the simple text "Applebot" in any part of the log line.
+
 ```bash
-echo '!!! purge' >> access.log
+echo '!!! add Applebot' >> access.log
 ```
 
 See:
