@@ -8,9 +8,9 @@ It’s designed for live ops use (tmux/screen) and forensics (replaying historic
 
 ## Download
 
-Prebuilt Linux binaries are available from the PattyGraph 0.1.0 release page:
+Prebuilt Linux binaries are available from the PattyGraph 0.1.1 release page:
 
-- [pattyGraph v0.1.0 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.0)
+- [pattyGraph v0.1.1 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.1)
 
 ## Features
 
