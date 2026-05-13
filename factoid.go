@@ -225,10 +225,10 @@ func NewFactoidGenerator() *FactoidGenerator {
 		return "           [white]▁▂▃▄▅▆▇█ " +
 			gradientText("pattyGraph ",
 				[]string{"red", "orangered", PattyOrange, "green", "blue", "indigo", "violet"}) +
-			gradientText("0.1.0",
+			gradientText(PattyGraphVersion,
 				[]string{"red", "orangered", PattyOrange, "green", "blue", "indigo", "violet"}) +
 			" [white]█▇▆▅▄▃▂▁ "
-		//return "Welcome to PattyGraph 0.1.0"
+		//return "Welcome to PattyGraph " + PattyGraphVersion
 	})
 
 	logReadIn := Once(func(_ []string) string {
