@@ -35,6 +35,7 @@ var flags = []flagInfo{
 	{"read", "r", DefaultMBToRead, "Number of MB back of logfile to read upon startup", "int"},
 	{"color-index", "l", 0, "Advance the color assignment index for a different look", "int"},
 	{"sparkout", "k", false, "Save sparkgraph json data to file once per interval", "bool"},
+	{"control", "C", false, "Read inline commands from pattyControl.log in save-dir/current dir", "bool"},
 	{"zero", "0", false, "Force cycle count = 0 at start", "bool"},
 	{"expert", "x", false, "Start with expert display on", "bool"},
 	{"version", "v", false, "Prints current version and exits", "bool"},
@@ -116,7 +117,7 @@ func parseArgs() *MonitorConfig {
 
 		categories := map[string][]string{
 			"General Settings": {"push", "scale", "grace", "flux"},
-			"Configuration":    {"config", "save-dir", "sparkout"},
+			"Configuration":    {"config", "save-dir", "sparkout", "control"},
 			"Customization":    {"title", "color-index", "read", "expert", "zero"},
 			"Help":             {"help"},
 		}
@@ -182,6 +183,7 @@ func parseArgs() *MonitorConfig {
 	forceZeroStart = *boolMap["zero"]
 	expertMode = *boolMap["expert"]
 	generateJsonSparks = *boolMap["sparkout"]
+	enableControlFile = *boolMap["control"]
 	colorIndex = *intMap["color-index"] // from config
 	machineDisplayName = *stringMap["title"]
 	machineDisplayName = *stringMap["title"]

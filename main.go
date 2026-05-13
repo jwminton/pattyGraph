@@ -31,6 +31,7 @@ var machineDisplayName string
 var forceZeroStart bool
 var expertMode bool
 var generateJsonSparks bool
+var enableControlFile bool
 
 // metrics
 var logLoadDuration time.Duration
@@ -41,12 +42,14 @@ var logLoadGCCost int64
 // PattyGraph is logically, hopelessly and naively "single threaded"
 // (ignoring support threads):
 //
-//	PattyGraph.startFileMonitoring() // starts file reading thread
-//	PattyGraph.startUI()             // launches display
+//	startFileMonitoring()        // tails the access log data plane
+//	startControlFileMonitoring() // tails the control file command plane
+//	startUI()                    // launches display
 //
-// There's a match thread that's running off of the file reading and the display thread
-// that's queueing display events into tview's display cycle. These are the two active
-// processes and they take turns being active on the same lock. The result is within the
+// There's a match thread that's running off of access log reading, a control thread that's
+// reading inline commands from pattyControl.log, and the display thread that's queueing
+// display events into tview's display cycle. These active processes take turns being
+// active on the same lock. The result is within the
 // PattyGraph codebase, it can be naively single threaded. This wasn't the initial
 // idea but even early coordination at top matcher levels was seeing horrible timing
 // issues. Turns out, when everything is lean and fast enough, a naive approach can work.
@@ -76,6 +79,7 @@ func main() {
 	// pflag visitor pattern so only flags on the command line are processed the second time.
 	mConf := parseArgs()
 	PattyGraph = NewMonitor(mConf)
+	botsIndex = botsMatcherIndex()
 
 	cpuName, heapName, allocName := "", "", ""
 	// symbol table drop flag in ./compile.sh may need to be adjusted
@@ -110,6 +114,7 @@ func main() {
 	}
 	PattyGraph.playConfigFile(mConf.builtinConfFile)
 	enforceCliFlags()
+	startControlFileMonitoring()
 	beforeLoadTime := time.Now()
 	preloadRecentMinutes()
 	logLoadDuration = time.Since(beforeLoadTime)
@@ -119,7 +124,7 @@ func main() {
 	debug.ReadGCStats(&stats)
 	logLoadGCCost = stats.NumGC
 
-	startFileMonitoring() // starts file reading thread
+	startFileMonitoring() // tails the access log data plane
 	doRandom = true
 	startUI() // Feeds tview's display cycle
 }
@@ -166,6 +171,8 @@ func enforceCliFlags() {
 			forceZeroStart = f.Value.String() == "true"
 		case "sparkout":
 			generateJsonSparks = f.Value.String() == "true"
+		case "control":
+			enableControlFile = f.Value.String() == "true"
 		case "color-index":
 			value, _ := strconv.Atoi(f.Value.String())
 			if value != colorIndex {

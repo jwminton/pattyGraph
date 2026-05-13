@@ -343,6 +343,21 @@ func findQuoteIndexes(line string) ([5]int, error) {
 	return indexes, nil
 }
 
+func findUserAgentCloseQuote(line string, userAgentOpenQuote int) (int, error) {
+	end := strings.TrimRightFunc(line, unicode.IsSpace)
+	if len(end) <= userAgentOpenQuote+1 || end[len(end)-1] != '"' {
+		return 0, fmt.Errorf("log line missing user-agent closing quote")
+	}
+
+	if strings.HasSuffix(end, ` "-"`) {
+		userAgentCloseQuote := len(end) - len(` "-"`) - 1
+		if userAgentCloseQuote > userAgentOpenQuote {
+			return userAgentCloseQuote, nil
+		}
+	}
+	return len(end) - 1, nil
+}
+
 func splitLogLinePartsIntoCurrent() error {
 	quoteIndex := strings.IndexByte(currentLine.logLine, '"')
 	if quoteIndex == -1 {
@@ -353,10 +368,6 @@ func splitLogLinePartsIntoCurrent() error {
 	if err != nil {
 		return err
 	}
-	if quoteIndexes[4] == len(line) {
-		return fmt.Errorf("log line ends at 5th quote unexpectedly")
-	}
-
 	// Parse directly into fields
 	//out.logLine = fullLine
 	currentLine.request = line[quoteIndexes[0]+1 : quoteIndexes[1]]
@@ -370,10 +381,11 @@ func splitLogLinePartsIntoCurrent() error {
 	currentLine.bytesValue = bytesVal
 
 	currentLine.referer = line[quoteIndexes[2]+1 : quoteIndexes[3]]
-	currentLine.userAgent = ""
-	if i := quoteIndexes[4] + 1; i < len(line)-1 {
-		currentLine.userAgent = line[i : len(line)-1]
+	userAgentCloseQuote, err := findUserAgentCloseQuote(line, quoteIndexes[4])
+	if err != nil {
+		return err
 	}
+	currentLine.userAgent = line[quoteIndexes[4]+1 : userAgentCloseQuote]
 
 	return nil
 }
@@ -390,21 +402,18 @@ func splitLogLineParts(fullLine string) (string, string, string, string, string,
 	//firstPart := strings.TrimSpace(logLine[:quoteIndex])  // From start to before the first quote
 	line := strings.TrimSpace(fullLine[quoteIndex:]) // From the first quote onward
 
-	// ^"GET /requested/url HTTP/1.1" 200 1234 "referer_url/text" "user agent text"$
-	// the first 5 double quotes are guaranteed to be present and delineate fields for well formed log lines
-	// and the last double quote is guaranteed to be the last char on the logLine.
+	// ^"GET /requested/url HTTP/1.1" 200 1234 "referer_url/text" "user agent text"
+	// The first 5 double quotes are guaranteed to be present and delineate the request,
+	// referer, and user-agent opening quote. The user-agent closing quote is found from
+	// the right side so quote bytes inside user-agent content do not affect parsing.
+	// Fields after the user-agent are ignored.
 	// use these facts to avoid regex parsing
 	quoteIndexes, err := findQuoteIndexes(line)
 	if err != nil {
 		return "", "", "", "", "", err
 	}
-	// quote indexes are valid
-	// making sure there's text after the last looked at quote
-	if quoteIndexes[4] == len(line) {
-		return "", "", "", "", "", fmt.Errorf("log logLine does not contain a valid request")
-	}
 	// The returned int slice did this:
-	// ^"GET /requested/url HTTP/1.1" 200 1234 "referer_url/text" "user agent text"$
+	// ^"GET /requested/url HTTP/1.1" 200 1234 "referer_url/text" "user agent text"
 	//  0                           1          2                3 4
 	// Above are the quotesIndexes legend, no need to mentally juggle
 	// messy but avoids regex and backtrack parsing
@@ -415,11 +424,11 @@ func splitLogLineParts(fullLine string) (string, string, string, string, string,
 	// and a fixed distance from the user agent start quote
 	bytes := line[quoteIndexes[1]+6 : quoteIndexes[2]-1]
 	referer := line[quoteIndexes[2]+1 : quoteIndexes[3]]
-	// covering the case agent text was just ""
-	agent := ""
-	if quoteIndexes[4]+1 < len(line) {
-		agent = line[quoteIndexes[4]+1 : len(line)-1]
+	userAgentCloseQuote, err := findUserAgentCloseQuote(line, quoteIndexes[4])
+	if err != nil {
+		return "", "", "", "", "", err
 	}
+	agent := line[quoteIndexes[4]+1 : userAgentCloseQuote]
 	// no backtrack, no regex, log logLine parsing is an easy predictable pattern
 	return request, resp, bytes, referer, agent, nil
 }
@@ -766,6 +775,15 @@ func invokeInlineCommand(line string) {
 		showMetricsPanelContents = !showMetricsPanelContents
 	case "expert", "EXPERT":
 		expertMode = !expertMode
+	case "control", "CONTROL":
+		value := "on"
+		if len(tokens) >= 2 {
+			args, _ := splitArgsShellStyle(commandLine[len(cmd):])
+			if len(args) > 0 {
+				value = args[0]
+			}
+		}
+		SetFlagByName("control", value)
 	case "purge", "PURGE":
 		// TODO: can take optional matcher name
 		purgePeakWordCommand()
@@ -888,30 +906,34 @@ func dumpConfig() {
 		return
 	}
 	defer f.Close()
+	writeConfig(f)
+}
+
+func writeConfig(w io.Writer) {
 	// TODO: Could just write everything out and then wrap all lines with the preamble
 	if machineDisplayName != "" {
-		f.WriteString(fmt.Sprintf(InlinePreamble+" title '%s'\n", machineDisplayName))
+		io.WriteString(w, fmt.Sprintf(InlinePreamble+" title '%s'\n", machineDisplayName))
 	}
 	if PattyGraph.pattyConfig.saveDir != "" {
-		f.WriteString(fmt.Sprintf(InlinePreamble+" save-dir '%s'\n", PattyGraph.pattyConfig.saveDirOriginal))
+		io.WriteString(w, fmt.Sprintf(InlinePreamble+" save-dir '%s'\n", PattyGraph.pattyConfig.saveDirOriginal))
 	}
 	if pattyPushFactor != pattyPushFactorDefault {
-		f.WriteString(fmt.Sprintf(InlinePreamble+" push %d\n", pattyPushFactor))
+		io.WriteString(w, fmt.Sprintf(InlinePreamble+" push %d\n", pattyPushFactor))
 	}
 	if pattyGracePeriod != pattyGracePeriodDefault {
-		f.WriteString(fmt.Sprintf(InlinePreamble+" grace %d\n", pattyGracePeriod))
+		io.WriteString(w, fmt.Sprintf(InlinePreamble+" grace %d\n", pattyGracePeriod))
 	}
 	if fluxDepth != DefaultFluxDepth {
-		f.WriteString(fmt.Sprintf(InlinePreamble+" flux %d\n", fluxDepth))
+		io.WriteString(w, fmt.Sprintf(InlinePreamble+" flux %d\n", fluxDepth))
 	}
 	if pattyScaleFactor != pattyScaleFactorDefault {
-		f.WriteString(fmt.Sprintf(InlinePreamble+" scale %1.1f\n", pattyScaleFactor))
+		io.WriteString(w, fmt.Sprintf(InlinePreamble+" scale %1.1f\n", pattyScaleFactor))
 	}
 	if PattyGraph.pattyConfig.mbToRead != DefaultMBToRead {
-		f.WriteString(fmt.Sprintf(InlinePreamble+" read %d\n", PattyGraph.pattyConfig.mbToRead))
+		io.WriteString(w, fmt.Sprintf(InlinePreamble+" read %d\n", PattyGraph.pattyConfig.mbToRead))
 	}
 	if expertMode {
-		f.WriteString(InlinePreamble + " expert\n")
+		io.WriteString(w, InlinePreamble+" expert\n")
 	}
 
 	// Iterate through matchers and write their inline command representation
@@ -921,11 +943,11 @@ func dumpConfig() {
 		}
 		cmd := m.asInlineCommand() // to be implemented per matcher
 		if cmd != "" {
-			f.WriteString(cmd + "\n")
+			io.WriteString(w, cmd+"\n")
 		}
 		matcher := m.asMatcher()
 		if matcher != nil && matcher.displayMatchMode != 0 {
-			f.WriteString(fmt.Sprintf(InlinePreamble+" mode %s %d\n", matcher.name, matcher.displayMatchMode))
+			io.WriteString(w, fmt.Sprintf(InlinePreamble+" mode %s %d\n", matcher.name, matcher.displayMatchMode))
 		}
 	} // Iterate through matchers and write their inline command representation
 	for _, m := range PattyGraph.matchers {
@@ -934,10 +956,10 @@ func dumpConfig() {
 		}
 		matcher := m.asMatcher()
 		if matcher != nil && matcher.isColorUserAssigned {
-			f.WriteString(fmt.Sprintf(InlinePreamble+" color %s %s\n", matcher.name, matcher.color))
+			io.WriteString(w, fmt.Sprintf(InlinePreamble+" color %s %s\n", matcher.name, matcher.color))
 		}
 	}
-	f.WriteString(fmt.Sprintf("#"+InlinePreamble+" color-index %d    # Next color index (Autogenerated)\n", colorIndex))
+	io.WriteString(w, fmt.Sprintf("#"+InlinePreamble+" color-index %d    # Next color index (Autogenerated)\n", colorIndex))
 }
 
 func setFlux(f int) bool {
@@ -958,6 +980,9 @@ func SetFlagByName(key string, value string) bool {
 		} else {
 			generateJsonSparks = false
 		}
+	case "control":
+		enableControlFile = parseControlEnabled(value)
+		return true
 	case "push":
 		if newPush, er := strconv.Atoi(value); er == nil {
 			pushIncr := newPush - pattyPushFactor
@@ -1748,6 +1773,84 @@ func layoutUI() {
 }
 
 var lineCh chan string
+var controlFileMonitorStarted bool
+
+func controlFilePath() string {
+	if PattyGraph.pattyConfig.saveDir != "" {
+		return filepath.Join(PattyGraph.pattyConfig.saveDir, "pattyControl.log")
+	}
+	return "pattyControl.log"
+}
+
+func parseControlEnabled(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "off", "false", "0", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+func isControlEnableLine(text string) bool {
+	if !strings.HasPrefix(text, InlinePreamble+" ") {
+		return false
+	}
+	fields := strings.Fields(text)
+	if len(fields) < 2 || strings.ToLower(fields[1]) != "control" {
+		return false
+	}
+	if len(fields) == 2 {
+		return true
+	}
+	return parseControlEnabled(fields[2])
+}
+
+func shouldProcessControlLine(text string) bool {
+	if !strings.HasPrefix(text, InlinePreamble+" ") {
+		return false
+	}
+	return enableControlFile || isControlEnableLine(text)
+}
+
+func startControlFileMonitoring() {
+	if controlFileMonitorStarted {
+		return
+	}
+	path := controlFilePath()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.Printf("Failed to create control file %s: %v", path, err)
+		return
+	}
+	if err := f.Close(); err != nil {
+		log.Printf("Failed to close control file %s: %v", path, err)
+		return
+	}
+
+	t, err := tail.TailFile(path, tail.Config{
+		Follow:   true,
+		ReOpen:   true,
+		Logger:   tail.DiscardingLogger,
+		Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd},
+	})
+	if err != nil {
+		log.Printf("Failed to monitor control file %s: %v", path, err)
+		return
+	}
+	controlFileMonitorStarted = true
+
+	go func() {
+		for line := range t.Lines {
+			text := strings.TrimRight(line.Text, "\r\n")
+			if !shouldProcessControlLine(text) {
+				continue
+			}
+			mu.Lock()
+			invokeInlineCommand(text)
+			mu.Unlock()
+		}
+	}()
+}
 
 func startFileMonitoring() {
 	t, err := tail.TailFile(PattyGraph.filePath, tail.Config{

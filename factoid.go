@@ -223,7 +223,7 @@ func NewFactoidGenerator() *FactoidGenerator {
 	//cleanText = strings.ReplaceAll(cleanText, "]", "⟧")
 	welcome := Random(4, func(_ []string) string {
 		return "           [white]▁▂▃▄▅▆▇█ " +
-			gradientText("PattyGraph ",
+			gradientText("pattyGraph ",
 				[]string{"red", "orangered", PattyOrange, "green", "blue", "indigo", "violet"}) +
 			gradientText("0.1.0",
 				[]string{"red", "orangered", PattyOrange, "green", "blue", "indigo", "violet"}) +

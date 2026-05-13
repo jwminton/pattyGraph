@@ -1,0 +1,62 @@
+  PattyGraph 0.1.0 by Jasen Minton
+https://github.com/jwminton/pattyGraph
+
+Inline command reference for config injection and runtime interaction. Any
+log line beginning with '!!!' is interpreted as an inline command instead
+of normal log content. Generated configuration files are a sequence of
+inline commands read in before data ingestion.
+
+Inject lines to manage pattyGraph operation:
+  echo '!!! purge' >> access.log
+
+NOTE: Single quotes avoid shell command expansion
+
+Matcher Commands:
+  !!! add <name> <pattern>...
+      Add a matcher with one or more text patterns. Quoted patterns allowed.
+  !!! del <name> 
+      Delete a matcher (text after <name> is ignored).
+  !!! color <name> <color>
+      Assign a named matcher a specific display color. See '--help colors'.
+  !!! mode <name> <0|1|2>
+      Set named matcher match information expansion from 0-minimal to 2-all
+
+Matcher names can be prefixed with a modifier to control placement:
+  +name → Add matcher at the top of the list.
+  -name → Add matcher just above the built-in "Bots" matcher. (default)
+  *name → Add as a non-competing matcher after "Bots".
+Modifiers apply to 'add', and are accepted but ignored for 'color' and 'del'.
+
+Configuration Settings:
+  !!! push <int>
+  !!! grace <int>
+  !!! scale <float>
+  !!! title <name>
+  !!! save-dir <path>
+      Set the directory for config and splat output (e.g. ~/splats).
+  !!! color-index <int>
+      Index into the color table for Matcher color assignment
+Misc Commands:
+  !!! popBots
+      Forces Bots to fork its top Bot match as new matcher
+  !!! demo
+      Advances tab view once every 10 seconds. Tab stops progression.
+  !!! ticker
+      Toggle Ticker operation (same as keyboard 'X') 
+  !!! history
+      Toggle Factoid History display (same as selecting Ticker) 
+Persistence & Export:
+  !!! pattySplat
+      Save the current screen state to a timestamped file.
+  !!! dumpConfig
+      Save the current matcher definitions to a new timestamped config file.
+  !!! json <on|off>
+      Turn on sparkgraph saves to <save-dir>/sparkgraph.json
+
+General:
+  - Lines must begin with '!!! '.
+      (When executing from a shell, single quotes avoid shell command expansion) 
+  - Quoted arguments are supported within a command:
+       e.g. '!!! add FTwitterbot "Facebot Twitterbot"'
+  - Lines starting with '#' and lines that don't match '!!!' are ignored.
+
