@@ -4,6 +4,20 @@
 
 Let pattyGraph tell your AI tools where to start with your next NGINX log emergency!
 
+This release turns PattyGraph into something more than a live terminal viewer for NGINX-style access logs. It is now designed to be invoked by AI tools, scripts, and automation workflows as a first-pass log investigation layer.
+
+PattyGraph still runs as an interactive TUI for humans watching traffic in real time, but the new `-j` / `--json` mode writes a sidecar JSONL stream alongside it.
+
+That sidecar gives another AI or automation process structured interval records: active matchers, top IPs, interesting URI and user-agent tokens, refs, bot activity, error bursts, IP groups, traffic totals, and generated factoids.
+
+The practical goal is simple:
+
+An AI should not have to ingest an entire access log just to figure out what is happening.
+
+PattyGraph can give it the shape of the traffic first. Then the AI can decide what raw-log searches to run next, which IPs or paths deserve attention, whether bot activity is normal or suspicious, and where deeper investigation should begin.
+
+## Tell me more...
+
 PattyGraph is a real-time terminal access-log analyzer for live ops, bot discovery, and traffic forensics. The 0.1.2 release adds sidecar JSONL output, so the same run that drives the interactive TUI can also write structured interval records for scripts, replay workflows, and AI-assisted triage. Use the terminal view to see traffic shape as it happens, then use the sidecar stream to decide where to aim `rg`, `grep`, `awk`, or deeper raw-log inspection.
 
 
