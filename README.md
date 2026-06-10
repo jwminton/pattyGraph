@@ -1,5 +1,10 @@
 # pattyGraph
 
+## New in v0.1.2: Live Terminal Triage, Now with JSONL Sidecar Output
+
+PattyGraph is a real-time terminal access-log analyzer for live ops, bot discovery, and traffic forensics. The 0.1.2 release adds sidecar JSONL output, so the same run that drives the interactive TUI can also write structured interval records for scripts, replay workflows, and AI-assisted triage. Use the terminal view to see traffic shape as it happens, then use the sidecar stream to decide where to aim `rg`, `grep`, `awk`, or deeper raw-log inspection.
+
+
 PattyGraph is a terminal-based, real-time access log analyzer for nginx-style logs. It highlights unusual or significant traffic patterns using sparklines, matchers, and ranked token/referrer/IP tables.
 
 It’s designed for live ops use (tmux/screen) and forensics (replaying historical log windows), with a dense interactive display that helps you see traffic **shape** and how it changes over time.
