@@ -19,7 +19,10 @@ const (
 
 	SidecarEventSessionStart = "session_start"
 	SidecarEventInterval     = "interval"
-	SidecarSchemaVersion     = 1
+	SidecarSchemaVersion     = 2
+
+	SidecarMarkedStateMarked   = "marked"
+	SidecarMarkedStateUnmarked = "unmarked"
 
 	defaultSidecarPrefix   = "sidecar_"
 	defaultSidecarSuffix   = ".jsonl"
@@ -174,6 +177,8 @@ type SidecarWordEntry struct {
 	LastSeenTic       int                `json:"last_seen_tic"`
 	LastStatus        string             `json:"last_status,omitempty"`
 	Color             string             `json:"color,omitempty"`
+	MarkedState       string             `json:"marked_state"`
+	MarkedByMatcher   string             `json:"marked_by_matcher,omitempty"`
 	IsPeak            bool               `json:"is_peak"`
 	Source            *SidecarLineSource `json:"source,omitempty"`
 	FirstIntervalLine string             `json:"first_interval_line,omitempty"`
@@ -193,6 +198,8 @@ type SidecarIPGroupEntry struct {
 	History           []int   `json:"history,omitempty"`
 	HistoryDepth      int     `json:"history_depth"`
 	Color             string  `json:"color,omitempty"`
+	MarkedState       string  `json:"marked_state"`
+	MarkedByMatcher   string  `json:"marked_by_matcher,omitempty"`
 	FirstLine         string  `json:"first_line,omitempty"`
 	FirstIntervalLine string  `json:"first_interval_line,omitempty"`
 	LastLine          string  `json:"last_line,omitempty"`
@@ -222,6 +229,8 @@ type SidecarLineSource struct {
 	ResponseCode    string   `json:"response_code,omitempty"`
 	UserAgentDelta  float64  `json:"user_agent_delta,omitempty"`
 	CaptureColor    string   `json:"capture_color,omitempty"`
+	MarkedState     string   `json:"marked_state"`
+	MarkedByMatcher string   `json:"marked_by_matcher,omitempty"`
 	TokenBandCount  int      `json:"token_band_count,omitempty"`
 	UserAgentTokens []string `json:"user_agent_tokens,omitempty"`
 }
@@ -461,6 +470,7 @@ func sidecarWordEntry(m *InterestingWordMatcher, key string, stats *WordStats, o
 	historyCopy := copyIntSlice(history)
 	source := sidecarLineSource(stats.source, opts.IncludeSourceLines)
 	score := stats.count + stats.primeFlux
+	markedState, markedByMatcher := sidecarMarkedFields(stats.source)
 
 	entry := SidecarWordEntry{
 		Key:              key,
@@ -476,6 +486,8 @@ func sidecarWordEntry(m *InterestingWordMatcher, key string, stats *WordStats, o
 		LastSeenTic:      stats.lastSeenTic,
 		LastStatus:       stats.lastStatus,
 		Color:            stats.captureColor(),
+		MarkedState:      markedState,
+		MarkedByMatcher:  markedByMatcher,
 		IsPeak:           m.peakWordsSet[key],
 		Source:           source,
 	}
@@ -501,6 +513,10 @@ func sidecarIPGroupEntries(m *InterestingWordMatcher, limit int, opts SidecarOpt
 			history = acc.Slice()
 		}
 		score := count + m.ipScratch.prefixFirstPlusCounts[prefix]
+		markedState, markedByMatcher := sidecarMarkedFields(&lineSource{
+			captureColor:   m.ipScratch.prefixColors[prefix],
+			captureMatcher: m.ipScratch.prefixMatchers[prefix],
+		})
 		entry := SidecarIPGroupEntry{
 			Prefix:           prefix,
 			Score:            score,
@@ -512,6 +528,8 @@ func sidecarIPGroupEntries(m *InterestingWordMatcher, limit int, opts SidecarOpt
 			AgentDeltaMetric: m.ipScratch.prefixDeltas[prefix],
 			HistoryDepth:     m.ipScratch.prefixDepths[prefix],
 			Color:            strings.Trim(m.ipScratch.prefixColors[prefix], "[]"),
+			MarkedState:      markedState,
+			MarkedByMatcher:  markedByMatcher,
 		}
 		if opts.IncludeHistories {
 			entry.History = history
@@ -636,6 +654,7 @@ func sidecarLineSource(line *lineSource, includeLogLine bool) *SidecarLineSource
 	if line == nil || !includeLogLine {
 		return nil
 	}
+	markedState, markedByMatcher := sidecarMarkedFields(line)
 	out := &SidecarLineSource{
 		IP:              line.ip,
 		IPPrefix:        line.ipPrefix,
@@ -646,6 +665,8 @@ func sidecarLineSource(line *lineSource, includeLogLine bool) *SidecarLineSource
 		ResponseCode:    line.respCode,
 		UserAgentDelta:  line.userAgentDelta,
 		CaptureColor:    strings.Trim(line.captureColor, "[]"),
+		MarkedState:     markedState,
+		MarkedByMatcher: markedByMatcher,
 		TokenBandCount:  line.tokenBandCount,
 		UserAgentTokens: copyStringSlice(line.userAgentTokens),
 	}
@@ -653,6 +674,13 @@ func sidecarLineSource(line *lineSource, includeLogLine bool) *SidecarLineSource
 		out.LogLine = line.logLine
 	}
 	return out
+}
+
+func sidecarMarkedFields(line *lineSource) (string, string) {
+	if line != nil && line.captureColor != "" {
+		return SidecarMarkedStateMarked, line.captureMatcher
+	}
+	return SidecarMarkedStateUnmarked, ""
 }
 
 func copyIntSlice(in []int) []int {

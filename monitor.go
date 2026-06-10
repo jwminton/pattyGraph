@@ -55,6 +55,7 @@ type lineSource struct {
 	respCode       string
 	userAgentDelta float64 // The delta seen per already seen IP request
 	captureColor   string  // could probably replace with a data striping approach
+	captureMatcher string
 
 	//tokenBand AgentBand
 	tokenBandCount int

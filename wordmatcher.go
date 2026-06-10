@@ -394,6 +394,7 @@ func (m *InterestingWordMatcher) match() bool {
 		stats.lastStatus = currentLine.respCode
 		if currentLine.captureColor != "" && (!firstColorWins || stats.source.captureColor == "") {
 			stats.source.captureColor = currentLine.captureColor
+			stats.source.captureMatcher = currentLine.captureMatcher
 		}
 		previousWeight := float64(stats.count)
 		newWeight := previousWeight + 1
@@ -640,8 +641,10 @@ func (m *InterestingWordMatcher) normalizedDenominator() float64 {
 type ipGroupScratch struct {
 	mEntries                 map[string]int
 	mColors                  map[string]string
+	mMatchers                map[string]string
 	prefixCounts             map[string]int
 	prefixColors             map[string]string
+	prefixMatchers           map[string]string
 	prefixDepths             map[string]int
 	prefixBursts             map[string]float64
 	prefixBytes              map[string]uint64
@@ -678,8 +681,14 @@ func (s *ipGroupScratch) Clear() {
 	for k := range s.mColors {
 		delete(s.mColors, k)
 	}
+	for k := range s.mMatchers {
+		delete(s.mMatchers, k)
+	}
 	for k := range s.prefixColors {
 		delete(s.prefixColors, k)
+	}
+	for k := range s.prefixMatchers {
+		delete(s.prefixMatchers, k)
 	}
 	for k := range s.prefixDepths {
 		delete(s.prefixDepths, k)
@@ -816,8 +825,10 @@ func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
 
 			if stats.source.captureColor != "" && scratch.mColors[ipAddr] == "" {
 				scratch.mColors[ipAddr] = stats.source.captureColor
+				scratch.mMatchers[ipAddr] = stats.source.captureMatcher
 				if _, exists := scratch.prefixColors[prefix]; !exists {
 					scratch.prefixColors[prefix] = stats.source.captureColor
+					scratch.prefixMatchers[prefix] = stats.source.captureMatcher
 				}
 			}
 			// Minimum info needed. Expensive info is processed later post-cut
@@ -918,6 +929,7 @@ func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
 		nwsBuf := &ringBuffer{}
 		ls := &lineSource{}
 		ls.captureColor = scratch.prefixColors[group.prefix]
+		ls.captureMatcher = scratch.prefixMatchers[group.prefix]
 		ls.logLine = scratch.prefixFirstLines[group.prefix]
 		nws := &WordStats{
 			count: group.count,
@@ -1434,14 +1446,16 @@ func createIpScratch() *ipGroupScratch {
 		prefixCounts:          make(map[string]int, startingMapSize),
 		prefixFirstPlusCounts: make(map[string]int, startingMapSize),
 
-		mEntries:      make(map[string]int, groupMapSize),
-		mColors:       make(map[string]string, groupMapSize),
-		prefixColors:  make(map[string]string, groupMapSize),
-		prefixDepths:  make(map[string]int, groupMapSize),
-		prefixBursts:  make(map[string]float64, groupMapSize),
-		prefixBytes:   make(map[string]uint64, groupMapSize),
-		prefixDeltas:  make(map[string]float64, groupMapSize),
-		prefixMembers: make(map[string]int, groupMapSize),
+		mEntries:       make(map[string]int, groupMapSize),
+		mColors:        make(map[string]string, groupMapSize),
+		mMatchers:      make(map[string]string, groupMapSize),
+		prefixColors:   make(map[string]string, groupMapSize),
+		prefixMatchers: make(map[string]string, groupMapSize),
+		prefixDepths:   make(map[string]int, groupMapSize),
+		prefixBursts:   make(map[string]float64, groupMapSize),
+		prefixBytes:    make(map[string]uint64, groupMapSize),
+		prefixDeltas:   make(map[string]float64, groupMapSize),
+		prefixMembers:  make(map[string]int, groupMapSize),
 		//prefixHistoryBufs:        make(map[string]*ringBuffer, groupMapSize),
 		prefixHistorAggregateBufs: make(map[string]*ringSeriesAccumulator, groupMapSize),
 		prefixStats:               make(map[string]*WordStats, groupMapSize),
@@ -1903,14 +1917,15 @@ func newWordStats() *WordStats {
 		lastStatus:            currentLine.respCode,
 	}
 	*src = lineSource{
-		ip:           currentLine.ip,
-		captureColor: currentLine.captureColor,
-		ipPrefix:     currentLine.ipPrefix,
-		logLine:      currentLine.logLine,
-		request:      currentLine.request,
-		respCode:     currentLine.respCode,
-		bytesValue:   currentLine.bytesValue,
-		referer:      currentLine.referer,
+		ip:             currentLine.ip,
+		captureColor:   currentLine.captureColor,
+		captureMatcher: currentLine.captureMatcher,
+		ipPrefix:       currentLine.ipPrefix,
+		logLine:        currentLine.logLine,
+		request:        currentLine.request,
+		respCode:       currentLine.respCode,
+		bytesValue:     currentLine.bytesValue,
+		referer:        currentLine.referer,
 	}
 	return ws
 }
@@ -1928,14 +1943,15 @@ func repopulateWordStats(ws *WordStats) {
 		lastStatus:            currentLine.respCode,
 	}
 	*src = lineSource{
-		ip:           currentLine.ip,
-		captureColor: currentLine.captureColor,
-		ipPrefix:     currentLine.ipPrefix,
-		logLine:      currentLine.logLine,
-		request:      currentLine.request,
-		respCode:     currentLine.respCode,
-		bytesValue:   currentLine.bytesValue,
-		referer:      currentLine.referer,
+		ip:             currentLine.ip,
+		captureColor:   currentLine.captureColor,
+		captureMatcher: currentLine.captureMatcher,
+		ipPrefix:       currentLine.ipPrefix,
+		logLine:        currentLine.logLine,
+		request:        currentLine.request,
+		respCode:       currentLine.respCode,
+		bytesValue:     currentLine.bytesValue,
+		referer:        currentLine.referer,
 	}
 }
 
@@ -1947,6 +1963,7 @@ func (ws *WordStats) Reset() {
 	}
 	ws.agentTokensFromSource = nil
 	ws.source.captureColor = ""
+	ws.source.captureMatcher = ""
 }
 
 func recycleWordStats(ws *WordStats) {

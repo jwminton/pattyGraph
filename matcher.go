@@ -421,6 +421,7 @@ func (m *Matcher) standardMatchedAction(_ [][]string) {
 	m.bytesServed += currentLine.bytesValue
 	if currentLine.captureColor == "" && m != PattyGraph.botsMatcher {
 		currentLine.captureColor = m.color
+		currentLine.captureMatcher = m.matcherName()
 	}
 }
 
@@ -862,6 +863,7 @@ func (m *Matcher) tagIp(lineIp string) (string, bool) {
 func (m *Matcher) defaultTagIpAction() bool {
 	if _, exists := m.matchCountsMap[currentLine.ip]; exists {
 		currentLine.captureColor = m.color
+		currentLine.captureMatcher = m.matcherName()
 		return true
 	}
 	return false
@@ -909,6 +911,7 @@ func MatcherFactory(matcherType string) *Matcher {
 			}
 			if currentLine.captureColor == "" {
 				currentLine.captureColor = PattyBotsColor
+				currentLine.captureMatcher = botsMatcher.matcherName()
 			}
 			//maybePrintStack2()
 		}

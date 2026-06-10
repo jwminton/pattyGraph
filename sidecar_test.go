@@ -12,6 +12,10 @@ import (
 func TestDefaultSidecarOptionsStayCompact(t *testing.T) {
 	opts := DefaultSidecarOptions()
 
+	if SidecarSchemaVersion != 2 {
+		t.Fatalf("SidecarSchemaVersion = %d, want 2", SidecarSchemaVersion)
+	}
+
 	if opts.TopLimit != defaultSidecarTopLimit {
 		t.Fatalf("TopLimit = %d, want %d", opts.TopLimit, defaultSidecarTopLimit)
 	}
@@ -78,5 +82,33 @@ func TestSidecarWordEntriesAreCappedSortedAndRanked(t *testing.T) {
 	}
 	if entries[len(entries)-1].Key != "word03" {
 		t.Fatalf("last capped key = %q, want word03", entries[len(entries)-1].Key)
+	}
+}
+
+func TestSidecarWordEntryMarkedFields(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	words := WordMatcherFactory("words")
+	opts := DefaultSidecarOptions()
+
+	markedStats := newWordStats()
+	markedStats.source.captureColor = "[red]"
+	markedStats.source.captureMatcher = "Bots"
+	marked := sidecarWordEntry(words, "marked", markedStats, opts)
+	if marked.MarkedState != SidecarMarkedStateMarked {
+		t.Fatalf("marked state = %q, want %q", marked.MarkedState, SidecarMarkedStateMarked)
+	}
+	if marked.MarkedByMatcher != "Bots" {
+		t.Fatalf("marked by = %q, want Bots", marked.MarkedByMatcher)
+	}
+
+	unmarkedStats := newWordStats()
+	unmarkedStats.source.captureColor = ""
+	unmarkedStats.source.captureMatcher = ""
+	unmarked := sidecarWordEntry(words, "unmarked", unmarkedStats, opts)
+	if unmarked.MarkedState != SidecarMarkedStateUnmarked {
+		t.Fatalf("unmarked state = %q, want %q", unmarked.MarkedState, SidecarMarkedStateUnmarked)
+	}
+	if unmarked.MarkedByMatcher != "" {
+		t.Fatalf("unmarked by = %q, want empty", unmarked.MarkedByMatcher)
 	}
 }
