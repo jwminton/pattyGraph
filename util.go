@@ -23,7 +23,7 @@ const (
 	PattyGraphAuthor    = "Jasen Minton"
 	PattyGraphGithubUrl = "https://github.com/jwminton/pattyGraph"
 	PattyGraphName      = "PattyGraph"
-	PattyGraphVersion   = "0.1.1"
+	PattyGraphVersion   = "0.1.2"
 
 	PattyOrange             = "#FFA96F"
 	PattyBotsColor          = "[#A0FFFF]"

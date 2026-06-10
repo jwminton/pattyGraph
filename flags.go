@@ -34,12 +34,13 @@ var flags = []flagInfo{
 	{"flux", "f", DefaultFluxDepth, "Flux is the history depth used for interesting word ranking.", "int"},
 	{"read", "r", DefaultMBToRead, "Number of MB back of logfile to read upon startup", "int"},
 	{"color-index", "l", 0, "Advance the color assignment index for a different look", "int"},
-	{"sparkout", "k", false, "Save sparkgraph json data to file once per interval", "bool"},
+	{"sparkout", "k", false, "Save sparkgraph json data to <save-dir>/sparkgraph.json once per interval", "bool"},
+	{"json", "j", false, "Write sidecar JSONL interval data to <save-dir>/sidecar_<session>.jsonl", "bool"},
 	{"control", "C", false, "Read inline commands from pattyControl.log in save-dir/current dir", "bool"},
 	{"zero", "0", false, "Force cycle count = 0 at start", "bool"},
 	{"expert", "x", false, "Start with expert display on", "bool"},
 	{"version", "v", false, "Prints current version and exits", "bool"},
-	{"help", "h", false, "Print this message or '-h <layout|inline|colors|words|facts>' for detailed help", "bool"},
+	{"help", "h", false, "Print this message or '-h <layout|sidecar|inline|colors|words|facts>' for detailed help", "bool"},
 }
 
 type MonitorConfig struct {
@@ -113,11 +114,21 @@ func parseArgs() *MonitorConfig {
 			return
 		}
 
+		if len(args) == 1 && args[0] == "sidecar" {
+			fmt.Println(sidecarHelpText())
+			return
+		}
+
+		if len(args) == 1 && args[0] == "sidecar" {
+			fmt.Println(sidecarHelpText())
+			return
+		}
+
 		fmt.Println(usageText())
 
 		categories := map[string][]string{
 			"General Settings": {"push", "scale", "grace", "flux"},
-			"Configuration":    {"config", "save-dir", "sparkout", "control"},
+			"Configuration":    {"config", "save-dir", "sparkout", "json", "control"},
 			"Customization":    {"title", "color-index", "read", "expert", "zero"},
 			"Help":             {"help"},
 		}
@@ -183,6 +194,7 @@ func parseArgs() *MonitorConfig {
 	forceZeroStart = *boolMap["zero"]
 	expertMode = *boolMap["expert"]
 	generateJsonSparks = *boolMap["sparkout"]
+	generateSidecarJSONL = *boolMap["json"]
 	enableControlFile = *boolMap["control"]
 	colorIndex = *intMap["color-index"] // from config
 	machineDisplayName = *stringMap["title"]

@@ -31,6 +31,7 @@ var machineDisplayName string
 var forceZeroStart bool
 var expertMode bool
 var generateJsonSparks bool
+var generateSidecarJSONL bool
 var enableControlFile bool
 
 // metrics
@@ -115,6 +116,14 @@ func main() {
 	PattyGraph.playConfigFile(mConf.builtinConfFile)
 	enforceCliFlags()
 	startControlFileMonitoring()
+	// Sidecar stream marker: write this before startup replay so AI consumers
+	// can correlate both ghost-run preload intervals and live TUI intervals
+	// under one session_id. The --json CLI flag gates this stream.
+	if generateSidecarJSONL {
+		if err := PattyGraph.WriteSidecarSessionStartJSONL(""); err != nil {
+			log.Printf("sidecar session start write failed: %v", err)
+		}
+	}
 	beforeLoadTime := time.Now()
 	preloadRecentMinutes()
 	logLoadDuration = time.Since(beforeLoadTime)
@@ -171,6 +180,8 @@ func enforceCliFlags() {
 			forceZeroStart = f.Value.String() == "true"
 		case "sparkout":
 			generateJsonSparks = f.Value.String() == "true"
+		case "json":
+			generateSidecarJSONL = f.Value.String() == "true"
 		case "control":
 			enableControlFile = f.Value.String() == "true"
 		case "color-index":
@@ -247,13 +258,37 @@ func preloadRecentMinutes() error {
 		// It's ok if logicalCycles is off bc of this gap.
 		if i != len(minutes)-1 || forceZeroStart {
 			logicalCycles += 60
+			var sidecarSnapshot SidecarInterval
+			if generateSidecarJSONL {
+				// Startup sidecar interval: preload replays completed historical
+				// minutes without the TUI timer, but the same push boundary
+				// semantics apply. Capture before push() resets interval state.
+				sidecarSnapshot = PattyGraph.SidecarSnapshotBeforePush()
+			}
 			push() // Push only if NOT the last minute
+			if generateSidecarJSONL {
+				if err := PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""); err != nil {
+					log.Printf("sidecar preload jsonl write failed: %v", err)
+				}
+			}
 		} else {
 			stopTime := time.Now().Second()
 			// if seconds went from say 57...2 we need to do a push to catch up.
 			if startTime > stopTime {
 				logicalCycles += 60
+				var sidecarSnapshot SidecarInterval
+				if generateSidecarJSONL {
+					// Startup sidecar interval: wall-clock rollover means the
+					// partial current minute should also be committed as a completed
+					// interval before live tailing begins.
+					sidecarSnapshot = PattyGraph.SidecarSnapshotBeforePush()
+				}
 				push()
+				if generateSidecarJSONL {
+					if err := PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""); err != nil {
+						log.Printf("sidecar preload jsonl write failed: %v", err)
+					}
+				}
 			}
 		}
 	}

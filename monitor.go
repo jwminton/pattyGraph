@@ -1741,7 +1741,19 @@ func startUI() {
 					updateDisplay()
 				}
 				if currentCycle >= DefaultIntervalSize {
+					var sidecarSnapshot SidecarInterval
+					if generateSidecarJSONL {
+						// Sidecar interval event: capture the just-completed interval before
+						// push() rolls live counters into history and resets interval state.
+						// The existing TUI cycle remains the timing authority for now.
+						sidecarSnapshot = PattyGraph.SidecarSnapshotBeforePush()
+					}
 					push()
+					if generateSidecarJSONL {
+						if err := PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""); err != nil {
+							log.Printf("sidecar jsonl write failed: %v", err)
+						}
+					}
 					resetCycle()
 				}
 			})
