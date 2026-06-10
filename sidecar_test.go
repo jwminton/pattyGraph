@@ -12,8 +12,8 @@ import (
 func TestDefaultSidecarOptionsStayCompact(t *testing.T) {
 	opts := DefaultSidecarOptions()
 
-	if SidecarSchemaVersion != 2 {
-		t.Fatalf("SidecarSchemaVersion = %d, want 2", SidecarSchemaVersion)
+	if SidecarSchemaVersion != 3 {
+		t.Fatalf("SidecarSchemaVersion = %d, want 3", SidecarSchemaVersion)
 	}
 
 	if opts.TopLimit != defaultSidecarTopLimit {
@@ -110,5 +110,53 @@ func TestSidecarWordEntryMarkedFields(t *testing.T) {
 	}
 	if unmarked.MarkedByMatcher != "" {
 		t.Fatalf("unmarked by = %q, want empty", unmarked.MarkedByMatcher)
+	}
+}
+
+func TestSidecarSelectedContextIncludesSelectedWordLines(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	refs := WordMatcherFactory("refs")
+	stats := newWordStats()
+	firstLine := `192.0.2.1 - - [22/Jan/2019:05:24:59 +0330] "GET /first HTTP/1.1" 200 3710 "https://example.test/start?page=1" "FirstAgent/1.0" "-"`
+	firstIntervalLine := `192.0.2.2 - - [22/Jan/2019:05:25:10 +0330] "POST /interval HTTP/1.1" 404 12 "https://example.test/interval?page=1" "IntervalAgent/2.0" "-"`
+	lastLine := `192.0.2.3 - - [22/Jan/2019:05:26:20 +0330] "GET /last HTTP/1.1" 499 0 "https://example.test/last?page=1" "LastAgent/3.0" "-"`
+	stats.source.logLine = firstLine
+	stats.source.ip = "192.0.2.1"
+	stats.source.ipPrefix = "192.0.2"
+	stats.source.request = "GET /first HTTP/1.1"
+	stats.source.respCode = "200"
+	stats.source.bytesValue = 3710
+	stats.source.referer = "https://example.test/start?page=1"
+	stats.source.userAgent = "FirstAgent/1.0"
+	stats.firstIntervalLogLine = firstIntervalLine
+	stats.lastLogLine = lastLine
+	refs.wordFrequency["torob.com"] = stats
+	refs.selectedKey = "torob.com"
+	PattyGraph.selectedInterestingMatcher = refs
+
+	selected := sidecarSelectedContext(PattyGraph)
+	if selected.InterestingMatcher != "refs" {
+		t.Fatalf("interesting matcher = %q, want refs", selected.InterestingMatcher)
+	}
+	if selected.InterestingKey != "torob.com" {
+		t.Fatalf("interesting key = %q, want torob.com", selected.InterestingKey)
+	}
+	if selected.FirstSource == nil || selected.FirstSource.Request != "GET /first HTTP/1.1" || selected.FirstSource.BytesValue != 3710 {
+		t.Fatalf("first source = %#v", selected.FirstSource)
+	}
+	if selected.FirstSource.LogLine != firstLine {
+		t.Fatalf("first source log line = %q", selected.FirstSource.LogLine)
+	}
+	if selected.FirstIntervalSource == nil || selected.FirstIntervalSource.ResponseCode != "404" || selected.FirstIntervalSource.Request != "POST /interval HTTP/1.1" {
+		t.Fatalf("first interval source = %#v", selected.FirstIntervalSource)
+	}
+	if selected.FirstIntervalSource.LogLine != firstIntervalLine {
+		t.Fatalf("first interval source log line = %q", selected.FirstIntervalSource.LogLine)
+	}
+	if selected.LastSource == nil || selected.LastSource.ResponseCode != "499" || selected.LastSource.BytesValue != 0 {
+		t.Fatalf("last source = %#v", selected.LastSource)
+	}
+	if selected.LastSource.LogLine != lastLine {
+		t.Fatalf("last source log line = %q", selected.LastSource.LogLine)
 	}
 }

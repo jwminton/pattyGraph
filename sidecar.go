@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -212,10 +213,14 @@ type SidecarFactoid struct {
 }
 
 type SidecarSelectedContext struct {
-	GraphValue         int    `json:"graph_value,omitempty"`
-	SelectionValue     string `json:"selection_value,omitempty"`
-	InterestingMatcher string `json:"interesting_matcher,omitempty"`
-	Matcher            string `json:"matcher,omitempty"`
+	GraphValue          int                `json:"graph_value,omitempty"`
+	SelectionValue      string             `json:"selection_value,omitempty"`
+	InterestingMatcher  string             `json:"interesting_matcher,omitempty"`
+	InterestingKey      string             `json:"interesting_key,omitempty"`
+	FirstSource         *SidecarLineSource `json:"first_source,omitempty"`
+	FirstIntervalSource *SidecarLineSource `json:"first_interval_source,omitempty"`
+	LastSource          *SidecarLineSource `json:"last_source,omitempty"`
+	Matcher             string             `json:"matcher,omitempty"`
 }
 
 type SidecarLineSource struct {
@@ -642,10 +647,59 @@ func sidecarSelectedContext(m *Monitor) SidecarSelectedContext {
 		SelectionValue: m.selectionValue,
 	}
 	if m.selectedInterestingMatcher != nil {
-		out.InterestingMatcher = m.selectedInterestingMatcher.mName
+		selected := m.selectedInterestingMatcher
+		out.InterestingMatcher = selected.mName
+		out.InterestingKey = selected.selectedKey
+		if stats := selected.wordFrequency[selected.selectedKey]; stats != nil {
+			sidecarFillSelectedWordStats(&out, stats)
+		} else if selected.ipScratch != nil {
+			if stats := selected.ipScratch.prefixStats[selected.selectedKey]; stats != nil {
+				sidecarFillSelectedWordStats(&out, stats)
+			}
+		}
 	}
 	if m.selectedMatcher != nil {
 		out.Matcher = m.selectedMatcher.matcherName()
+	}
+	return out
+}
+
+func sidecarFillSelectedWordStats(out *SidecarSelectedContext, stats *WordStats) {
+	if stats == nil {
+		return
+	}
+	out.FirstSource = sidecarLineSource(stats.source, true)
+	out.FirstIntervalSource = sidecarLineSourceFromLogLine(stats.firstIntervalLogLine)
+	out.LastSource = sidecarLineSourceFromLogLine(stats.lastLogLine)
+}
+
+func sidecarLineSourceFromLogLine(logLine string) *SidecarLineSource {
+	if logLine == "" {
+		return nil
+	}
+
+	out := &SidecarLineSource{
+		LogLine:     logLine,
+		MarkedState: SidecarMarkedStateUnmarked,
+	}
+	spaceIndex := strings.IndexByte(logLine, ' ')
+	if spaceIndex != -1 {
+		out.IP = logLine[:spaceIndex]
+		if _, prefix := isLikelyIPv4AndPrefix(out.IP); prefix != "" {
+			out.IPPrefix = prefix
+		}
+	}
+
+	request, resp, bytesText, referer, agent, err := splitLogLineParts(logLine)
+	if err != nil {
+		return out
+	}
+	out.Request = request
+	out.ResponseCode = resp
+	out.Referer = referer
+	out.UserAgent = agent
+	if bytesValue, err := strconv.Atoi(bytesText); err == nil {
+		out.BytesValue = bytesValue
 	}
 	return out
 }
