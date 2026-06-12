@@ -268,7 +268,7 @@ func preloadRecentMinutes() error {
 			push() // Push only if NOT the last minute
 			if generateSidecarJSONL {
 				if err := PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""); err != nil {
-					log.Printf("sidecar preload jsonl write failed: %v", err)
+					log.Printf("PattyLog preload jsonl write failed: %v", err)
 				}
 			}
 		} else {
@@ -286,7 +286,7 @@ func preloadRecentMinutes() error {
 				push()
 				if generateSidecarJSONL {
 					if err := PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""); err != nil {
-						log.Printf("sidecar preload jsonl write failed: %v", err)
+						log.Printf("PattyLog preload jsonl write failed: %v", err)
 					}
 				}
 			}
@@ -364,7 +364,7 @@ type MinuteGroup struct {
 func handlePanicToFile() {
 	saveDir := PattyGraph.pattyConfig.saveDir
 	if r := recover(); r != nil {
-		filename := fmt.Sprintf("panic_%s.txt", strconv.FormatInt(time.Now().Unix(), 36))
+		filename := newTimestampedFilename("panic_", ".txt")
 		fullPath := filepath.Join(saveDir, filename)
 
 		stack := cleanStackTrace("pattyGraph")

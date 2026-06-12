@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 )
@@ -30,6 +31,15 @@ func TestDefaultSidecarOptionsStayCompact(t *testing.T) {
 	}
 	if !opts.IncludeMatcherKeys {
 		t.Fatal("IncludeMatcherKeys = false, want true")
+	}
+}
+
+func TestTimestampedFileIDUsesSidecarStyleUTCStem(t *testing.T) {
+	stamp := time.Date(2026, time.June, 12, 1, 2, 3, 4005006, time.FixedZone("PDT", -7*60*60))
+	want := fmt.Sprintf("20260612_080203_%d", os.Getpid())
+
+	if got := timestampedFileID(stamp); got != want {
+		t.Fatalf("timestampedFileID() = %q, want %q", got, want)
 	}
 }
 

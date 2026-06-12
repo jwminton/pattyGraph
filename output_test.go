@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -79,6 +80,9 @@ func TestPrintToFileStripsColorTags(t *testing.T) {
 	}
 	if len(matches) != 1 {
 		t.Fatalf("splat files = %v, want exactly one", matches)
+	}
+	if !regexp.MustCompile(`^pattySplat_[0-9]{8}_[0-9]{6}_[0-9]+\.txt$`).MatchString(filepath.Base(matches[0])) {
+		t.Fatalf("splat file = %q, want shared timestamp stem", filepath.Base(matches[0]))
 	}
 	content, err := os.ReadFile(matches[0])
 	if err != nil {

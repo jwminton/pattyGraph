@@ -34,13 +34,13 @@ var flags = []flagInfo{
 	{"flux", "f", DefaultFluxDepth, "Flux is the history depth used for interesting word ranking.", "int"},
 	{"read", "r", DefaultMBToRead, "Number of MB back of logfile to read upon startup", "int"},
 	{"color-index", "l", 0, "Advance the color assignment index for a different look", "int"},
-	{"sparkout", "k", false, "Save sparkgraph json data to <save-dir>/sparkgraph.json once per interval", "bool"},
-	{"json", "j", false, "Write sidecar JSONL interval data to <save-dir>/sidecar_<session>.jsonl", "bool"},
+	//{"sparkout", "k", false, "Save sparkgraph json data to <save-dir>/sparkgraph.json once per interval", "bool"},
+	{"json", "j", false, "Write PattyLog JSONL interval data to <save-dir>/pattyLog_<date>_<time>_<pid>.jsonl", "bool"},
 	{"control", "C", false, "Read inline commands from pattyControl.log in save-dir/current dir", "bool"},
 	{"zero", "0", false, "Force cycle count = 0 at start", "bool"},
-	{"expert", "x", false, "Start with expert display on", "bool"},
+	//{"expert", "x", false, "Start with expert display on", "bool"},
 	{"version", "v", false, "Prints current version and exits", "bool"},
-	{"help", "h", false, "Print this message or '-h <layout|sidecar|inline|colors|words|facts>' for detailed help", "bool"},
+	{"help", "h", false, "Print this message or '-h <ai|layout|jsonl|inline|colors|words|facts>' for detailed help", "bool"},
 }
 
 type MonitorConfig struct {
@@ -114,13 +114,13 @@ func parseArgs() *MonitorConfig {
 			return
 		}
 
-		if len(args) == 1 && args[0] == "sidecar" {
+		if len(args) == 1 && (args[0] == "jsonl" || args[0] == "json") {
 			fmt.Println(sidecarHelpText())
 			return
 		}
 
-		if len(args) == 1 && args[0] == "sidecar" {
-			fmt.Println(sidecarHelpText())
+		if len(args) == 1 && args[0] == "ai" {
+			fmt.Println(aiHelpText())
 			return
 		}
 
@@ -128,9 +128,11 @@ func parseArgs() *MonitorConfig {
 
 		categories := map[string][]string{
 			"General Settings": {"push", "scale", "grace", "flux"},
-			"Configuration":    {"config", "save-dir", "sparkout", "json", "control"},
-			"Customization":    {"title", "color-index", "read", "expert", "zero"},
-			"Help":             {"help"},
+			//"Configuration":    {"config", "save-dir", "sparkout", "json", "control"},
+			//"Customization":    {"title", "color-index", "read", "expert", "zero"},
+			"Configuration": {"config", "save-dir", "json", "control"},
+			"Customization": {"title", "color-index", "read", "zero"},
+			"Help":          {"help"},
 		}
 		categoryNames := []string{"General Settings", "Configuration", "Customization", "Help"}
 
@@ -192,8 +194,8 @@ func parseArgs() *MonitorConfig {
 	pattyPushFactor = *intMap["push"]
 	pattyScaleFactor = *floatMap["scale"]
 	forceZeroStart = *boolMap["zero"]
-	expertMode = *boolMap["expert"]
-	generateJsonSparks = *boolMap["sparkout"]
+	//expertMode = *boolMap["expert"]
+	//generateJsonSparks = *boolMap["sparkout"]
 	generateSidecarJSONL = *boolMap["json"]
 	enableControlFile = *boolMap["control"]
 	colorIndex = *intMap["color-index"] // from config
@@ -288,8 +290,8 @@ Keyboard Shortcuts:
    ctrl-m     Add selected entry as matcher (top of list)
    ctrl-n     Add selected entry as non-competing matcher (below Bots)
    ctrl-b     Add selected entry as matcher (above Bots)
-   ctrl-s     Save screen to <save-dir>/pattySplat_xxxxxx.txt
-   ctrl-g     Save config to <save-dir>/pattyGraph_xxxxxx.conf
+   ctrl-s     Save screen to <save-dir>/pattySplat_<date>_<time>_<pid>.txt
+   ctrl-g     Save config to <save-dir>/pattyGraph_<date>_<time>_<pid>.conf
    ctrl-d     Delete selected matcher (or disable Bots bot spawning)
    ctrl-k     Toggle creation of <save-dir>/sparkgraph.json 
    ctrl-f     Toggle random fact stream source
@@ -361,7 +363,8 @@ Matcher Commands:
   !!! add <flag*> <name> <pattern>...
         valid flags: --refs, --words, or --ips
       Add a matcher with one or more text patterns. Quoted patterns allowed.
-      If a flag is given that 'interesting' scope is used.
+      If a flag is given that 'interesting' scope is used. If no flag is given
+      the entire log line is searched.
   !!! del <name> 
       Delete a matcher (text after <name> is ignored).
   !!! color <name> <color>
@@ -372,7 +375,7 @@ Matcher Commands:
       Clear the current interesting-item selection.
   !!! select <flag> <key>
         valid flags: --refs, --words, or --ips.
-      Select the first matching interesting item. 
+      Select the first matching interesting item in the given scope. Exact match.
       A flag must be used to indicate scope
 
 

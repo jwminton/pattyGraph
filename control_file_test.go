@@ -124,7 +124,7 @@ func TestControlFileStartMarkerIsCommentAndIgnoredAsCommand(t *testing.T) {
 		"session_id=" + sidecarSessionID,
 		"control_file_enabled=true",
 		"file_path=\"./access.log\"",
-		"sidecar_path=\"splats/sidecar_",
+		"sidecar_path=\"splats/pattyLog_",
 	}
 	for _, want := range wantParts {
 		if !strings.Contains(marker, want) {

@@ -1021,8 +1021,7 @@ func pattySplat() {
 	PattyGraph.printToFile()
 }
 func dumpConfig() {
-	// Build filename using the same pattern as pattySplat
-	filename := fmt.Sprintf("pattyGraph_%s.conf", strconv.FormatInt(time.Now().Unix(), 36))
+	filename := newTimestampedFilename("pattyGraph_", ".conf")
 	fullPath := filename
 	if PattyGraph.pattyConfig.saveDir != "" {
 		fullPath = filepath.Join(PattyGraph.pattyConfig.saveDir, filename)
@@ -1877,7 +1876,7 @@ func startUI() {
 					push()
 					if generateSidecarJSONL {
 						if err := PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""); err != nil {
-							log.Printf("sidecar jsonl write failed: %v", err)
+							log.Printf("PattyLog jsonl write failed: %v", err)
 						}
 					}
 					resetCycle()
@@ -1996,7 +1995,7 @@ func startControlFileMonitoring() {
 			result := invokeInlineCommand(text)
 			if generateSidecarJSONL {
 				if err := PattyGraph.WriteSidecarControlCommandJSONL(text, "control_file", result, ""); err != nil {
-					log.Printf("sidecar control command write failed: %v", err)
+					log.Printf("PattyLog control command write failed: %v", err)
 				}
 			}
 			mu.Unlock()
@@ -2146,9 +2145,7 @@ func expandUser(path string) string {
 }
 
 func (m *Monitor) printToFile() error {
-	// Open the file
-	filename := fmt.Sprintf("pattySplat_%s.txt", strconv.FormatInt(time.Now().Unix(), 36))
-	// Join with saveDir using filepath — handles slashes on all platforms
+	filename := newTimestampedFilename("pattySplat_", ".txt")
 	fullPath := filename
 	if m.pattyConfig.saveDir != "" {
 		fullPath = filepath.Join(m.pattyConfig.saveDir, filename)

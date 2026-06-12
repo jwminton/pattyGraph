@@ -5,7 +5,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -26,7 +25,7 @@ const (
 	SidecarMarkedStateMarked   = "marked"
 	SidecarMarkedStateUnmarked = "unmarked"
 
-	defaultSidecarPrefix   = "sidecar_"
+	defaultSidecarPrefix   = "pattyLog_"
 	defaultSidecarSuffix   = ".jsonl"
 	defaultSidecarTopLimit = 25
 )
@@ -823,11 +822,11 @@ func sidecarEventTime(m *Monitor) time.Time {
 }
 
 func sidecarSessionFilename() string {
-	return defaultSidecarPrefix + sidecarSessionID + defaultSidecarSuffix
+	return timestampedFilename(defaultSidecarPrefix, sidecarSessionID, defaultSidecarSuffix)
 }
 
 func newSidecarSessionID() string {
-	return fmt.Sprintf("%s-%d", time.Now().UTC().Format("20060102T150405.000000000Z"), os.Getpid())
+	return timestampedFileID(time.Now())
 }
 
 func sidecarUptimeSeconds() int64 {
@@ -839,11 +838,11 @@ func sidecarUptimeSeconds() int64 {
 
 func sidecarHelpText() string {
 	return `
-Sidecar JSONL output is intended for file-based automation consumers.
+PattyGraph JSONL output is intended for file-based automation consumers.
 It leaves the normal TUI running, but also writes structured interval records
 that can be tailed, replayed, or used to choose targeted raw-log searches.
 
-Enable sidecar output from the CLI:
+Enable JSONL output from the CLI:
   pattyGraph -j 
   pattyGraph --json
 
@@ -851,15 +850,15 @@ Recommended quick AI startup pattern to start and read the last 10M of log file:
   pattyGraph --json --read 10 --config splats/pattyGraph.conf /path/to/access.log
 
 The -r/--read option preloads recent log data before live tailing starts.
-The startup replay pushes are also written to the sidecar file, so a reader
+The startup replay pushes are also written to the pattyLog file, so a reader
 gets immediate context before monitoring the live stream. Smaller read values
 keep startup output bounded while still showing recent traffic shape.
 
 Default output path:
-  <save-dir>/sidecar_<session_id>.jsonl
+  <save-dir>/pattyLog_<date>_<time>_<pid>.jsonl
 
 If save-dir is not configured, the file is written in the current directory.
-Each PattyGraph process gets a new sidecar filename. Existing sidecar files are
+Each PattyGraph process gets a new pattyLog filename. Existing pattyLog files are
 not cleared or appended across process sessions.
 
 JSONL Record types:
@@ -880,7 +879,7 @@ JSONL Record types:
       control_file_path, and structured result metadata.
 
 Important fields:
-  schema_version   Version of the sidecar JSON schema.
+  schema_version   Version of the pattyLog JSON schema.
   event_type       session_start, interval, or control_command.
   session_id       Stable id shared by all records in one file.
   timestamp        Wall time for session_start; log time for interval records.
@@ -891,20 +890,198 @@ Important fields:
   interesting      Ranked words, refs, and ips.
   factoids         Short generated observations about current state.
 
-The sidecar stream is not intended to replace grep, rg, awk, or direct log
+The pattyLog stream is not intended to replace grep, rg, awk, or direct log
 inspection. It is a triage layer. Use it to answer where to start, then run
 targeted raw-log searches based on the top IPs, prefixes, words, refs, bots,
 and error codes.
 
-Example follow-up searches after reading sidecar output:
+Example follow-up searches after reading pattyLog output:
   rg " 404 " access.log
   rg "Googlebot|bingbot|Applebot" access.log
   rg "^192\\.0\\.|^198\\.51\\.|^203\\.0\\." access.log
   rg "GET /image|GET /filter" access.log
 
 Notes:
-  - CLI --json/-j controls sidecar JSONL output.
-  - The TUI remains active; sidecar output is currently layered onto the same
+  - CLI --json/-j controls pattyLog JSONL output.
+  - The TUI remains active; pattyLog output is currently layered onto the same
     push-cycle timing.
+`
+}
+
+func aiHelpText() string {
+	return `
+AI operation
+
+PattyGraph is a live terminal/TUI instrument for NGINX access-log analysis.
+For AI-assisted operation, run PattyGraph inside tmux so a human and an AI 
+can operate through the same terminal session
+
+Recommended shared startup pattern:
+
+  tmux new-session -d -s pattygraph-ai './pattyGraph --json --control <normal args here>'
+
+Human attach pattern:
+
+  tmux attach -t pattygraph-ai
+
+Recommended help topics to inspect before operating:
+
+  ./pattyGraph --help
+  ./pattyGraph --help jsonl
+  ./pattyGraph --help inline
+  ./pattyGraph --help layout
+  ./pattyGraph --help words
+  ./pattyGraph --help facts
+
+Important outputs
+
+Live TUI:
+  Human-facing operational view. It updates continuously and includes color,
+  selection state, sparklines, changing counters, and short generated facts.
+  Use it for shared human/AI situational awareness, not as the primary
+  machine-readable data source.
+
+pattySplat:
+  Saved full text screen state. Use this for bounded AI analysis of the current
+  display. A pattySplat includes the first 100 entries, not only the rows
+  currently visible in the terminal.
+  Force a pattySplat with the inline command:
+    !!! pattySplat
+
+pattyLog JSONL:
+  Structured interval output. Use this for machine-readable state: interval
+  summaries, matcher counts, interesting words/refs/IPs, selected-item source
+  data, factoids, and inline command results.
+
+  pattyLog files are saved in <save-dir> using:
+
+    pattyLog_<date>_<time>_<pid>.jsonl
+
+  The <date> and <time> fields are UTC:
+
+    <date> = YYYYMMDD
+    <time> = HHMMSS
+    <pid>  = PattyGraph process id
+
+Generated configs:
+  PattyGraph can save matcher configuration snapshots using:
+
+    pattyGraph_<date>_<time>_<pid>.conf
+
+  These config files contain inline-command-style matcher definitions and can
+  be reused with -config.
+
+File discovery
+
+All generated files are written to <save-dir>. If save-dir is not configured,
+use the current working directory.
+
+Find the latest pattySplat:
+
+  ls -t <save-dir>/pattySplat_*.txt 2>/dev/null | head -1
+
+Find the latest pattyLog JSONL file:
+
+  ls -t <save-dir>/pattyLog_*.jsonl 2>/dev/null | head -1
+
+Find the latest generated config:
+
+  ls -t <save-dir>/pattyGraph_*.conf 2>/dev/null | head -1
+
+Use a generated config directly:
+
+  ./pattyGraph <normal args here> -config <latest-config>
+
+If replacing a stable config such as pattyGraph.conf, make a backup first.
+
+Do not use tmux capture-pane as the primary snapshot method. It only captures
+visible terminal text. Prefer pattySplat for bounded screen-state analysis and
+pattyLog JSONL for structured state.
+
+Basic AI workflow
+
+1. Start PattyGraph with --json and --control if the user has not already done
+   so. Use --read with a bounded value when startup context is useful.
+2. Locate the active pattyLog JSONL file and read the session_start record.
+   Confirm output_path, file_path, control_file_enabled, and control_file_path.
+3. Read recent interval records from the pattyLog file. Identify top words,
+   refs, IPs, matcher counts, errors, IP groups, and factoids.
+4. If display context matters, issue "!!! pattySplat" and inspect the latest
+   pattySplat file instead of scraping tmux.
+5. For deeper evidence, use targeted raw-log searches based on pattyLog
+   findings. Avoid broad ingestion of large access logs unless the human asks.
+6. If you change matchers or selections, wait for the next interval before
+   judging the result.
+7. Save a config if the matcher setup should persist.
+
+Inline command workflow
+
+Inline commands begin with:
+
+  !!!
+
+Use inline commands through pattyControl.log when --control is enabled, or in
+config files before data ingestion. See --help inline for the full command set.
+
+To issue an inline command:
+Example inline command issued to create a pattySplat:
+  printf '%s\n' '!!! pattySplat' >> <control-file-path>
+Example inline command to select a specific IP:
+  printf '%s\n' '!!! select --ips 203.0.113.10' >> <control-file-path>
+
+Selection workflow:
+
+1. Select an interesting item:
+
+     !!! select --refs some_token
+     !!! select --words some_token
+     !!! select --ips 203.0.113.10
+
+2. Read the pattyLog control_command record to confirm the command was applied.
+3. Read the next interval record for selected context and source-line metadata.
+
+Matcher workflow:
+
+1. Add, delete, color, and tune matchers using documented inline commands or
+   TUI keys.
+2. After matcher changes, wait for the next interval before judging results.
+3. Save the generated config if the matcher setup should persist.
+
+Example targeted raw-log searches
+
+Use pattyLog JSONL to decide what to search for, then search the raw access log
+directly. Examples:
+
+  rg " 404 " access.log
+  rg "Googlebot|bingbot|Applebot" access.log
+  rg "^192\\.0\\.|^198\\.51\\.|^203\\.0\\." access.log
+  rg "GET /image|GET /filter" access.log
+
+Interval considerations:
+Live TUI:
+  Human-facing operational view. It updates once per second and includes color,
+  selection state, sparklines, changing counters, and short generated facts.
+pattyLog JSONL:
+  Structured output written once per minute.
+
+Interpretation rules
+
+State which source supports your conclusions:
+
+  "from the latest pattySplat"
+  "from the latest pattyLog interval"
+  "from the live TUI"
+  "from targeted raw-log searches"
+
+Do not claim second-by-second behavior unless you observed the live TUI or have
+records at that resolution. JSONL pattyLog interval timestamps are log-derived for
+interval records and wall-clock for session_start/control_command records.
+
+Do not paste or ingest large raw logs unless the human specifically asks.
+Prefer small, targeted searches based on PattyGraph findings.
+
+Be conservative with destructive or persistent actions. Before replacing a
+stable config, deleting matchers, or changing long-lived files, preserve a
+backup or ask the human.
 `
 }

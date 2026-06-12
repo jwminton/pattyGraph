@@ -7,10 +7,8 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -960,9 +958,17 @@ var factoidHistory []string
 
 const maxFactoidHistory = 50
 
-//var saveFactoidLog bool
-//var factoidLogFile *os.File
-//var factoidLogPath string
+func newTimestampedFilename(prefix string, suffix string) string {
+	return timestampedFilename(prefix, timestampedFileID(time.Now()), suffix)
+}
+
+func timestampedFilename(prefix string, id string, suffix string) string {
+	return prefix + id + suffix
+}
+
+func timestampedFileID(t time.Time) string {
+	return fmt.Sprintf("%s_%d", t.UTC().Format("20060102_150405"), os.Getpid())
+}
 
 func getWrappedFactoid() string {
 	newFact, ranking := facts.NextLogged()
@@ -1225,73 +1231,10 @@ func stripBrackets(s string) string {
 //)
 //const maxLogSize = 30 * MB
 
-// TODO Reinstate truncation by config flag?
-func truncateIfTooLarge(path string) error {
-	_, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // no file yet, nothing to truncate
-		}
-		return err
-	}
-	//// keep the whole thing for now!
-	//// but later, Don't nuke the whole file!
-	//if info.Size() > maxLogSize {
-	//	return os.Truncate(path, 20*MB)
-	//}
-	return nil
-}
-
-// NextLogged checks g.Next() and appends qualifying factoids to factoids.log.
-// It ALWAYS returns (text, rank) even if logging fails.
+// NextLogged preserves the historical call site name without writing a separate
+// factoid log. Factoids are already emitted through the sidecar JSONL stream.
 func (g *FactoidGenerator) NextLogged() (string, int) {
-	text, rank, factName := g.Next()
-
-	// Always return the factoid info, regardless of logging outcomes.
-	if rank < 5 {
-		return text, rank // skip low-ranked factoids; no logging
-	}
-
-	if factName == "" {
-		factName = "--internal--"
-	}
-
-	timestamp := time.Now().Format("2006-01-02 15:04:05")
-	logLine := fmt.Sprintf("[%s] %s %s\n", timestamp, factName, stripBrackets(text))
-
-	// Resolve and ensure the log directory exists.
-	saveDir := PattyGraph.pattyConfig.saveDir
-	//if saveDir == "" {
-	//	log.Printf("factoid log dir is empty; skipping log write")
-	//	return text, rank
-	//}
-	//if err := os.MkdirAll(saveDir, 0o755); err != nil {
-	//	log.Printf("cannot create factoid log dir %q: %v", saveDir, err)
-	//	return text, rank
-	//}
-
-	logPath := filepath.Join(saveDir, "factoids.log")
-
-	// Best-effort housekeeping; keep going on failure.
-	if err := truncateIfTooLarge(logPath); err != nil {
-		log.Printf("could not manage factoid log %q: %v", logPath, err)
-	}
-
-	file, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		//log.Printf("opening factoid log %q: %v", logPath, err)
-		return text, rank
-	}
-	defer func() {
-		if cerr := file.Close(); cerr != nil {
-			log.Printf("closing factoid log %q: %v", logPath, cerr)
-		}
-	}()
-
-	if _, err := file.WriteString(logLine); err != nil {
-		log.Printf("writing factoid log %q: %v", logPath, err)
-	}
-
+	text, rank, _ := g.Next()
 	return text, rank
 }
 
