@@ -92,6 +92,91 @@ func TestInlineDelDecoratedNameRemovesMatcher(t *testing.T) {
 	}
 }
 
+func TestInlineSelectInterestingMatcherByKey(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	refs := PattyGraph.refsMatcher
+	refs.currentListing = []string{"www.zanbil.ir", "Suspicious", "filter"}
+	PattyGraph.selectedInterestingMatcher = nil
+
+	result := invokeInlineCommand("!!! select --refs Suspicious")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q", result.Status, InlineCommandStatusApplied)
+	}
+	if result.Result["action"] != "select_interesting" {
+		t.Fatalf("action = %v, want select_interesting", result.Result["action"])
+	}
+	if result.Result["matcher"] != "refs" {
+		t.Fatalf("matcher = %v, want refs", result.Result["matcher"])
+	}
+	if result.Result["selection"] != "Suspicious" {
+		t.Fatalf("selection = %v, want Suspicious", result.Result["selection"])
+	}
+	if result.Result["selection_index"] != 1 {
+		t.Fatalf("selection_index = %v, want 1", result.Result["selection_index"])
+	}
+	if PattyGraph.selectedInterestingMatcher != refs {
+		t.Fatal("refs matcher was not selected")
+	}
+	if refs.selectedKey != "Suspicious" {
+		t.Fatalf("selectedKey = %q, want Suspicious", refs.selectedKey)
+	}
+}
+
+func TestInlineSelectWithoutArgsClearsInterestingSelection(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	refs := PattyGraph.refsMatcher
+	refs.currentListing = []string{"www.zanbil.ir", "Suspicious", "filter"}
+	refs.selectDisplayItem(1)
+	if PattyGraph.selectedInterestingMatcher != refs {
+		t.Fatal("refs matcher was not selected before clear")
+	}
+
+	result := invokeInlineCommand("!!! select")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q", result.Status, InlineCommandStatusApplied)
+	}
+	if result.Result["action"] != "clear_selection" {
+		t.Fatalf("action = %v, want clear_selection", result.Result["action"])
+	}
+	if PattyGraph.selectedInterestingMatcher != nil {
+		t.Fatal("selected interesting matcher was not cleared")
+	}
+	if refs.selectedKey != "" {
+		t.Fatalf("selectedKey = %q, want empty", refs.selectedKey)
+	}
+}
+
+func TestInlineSelectIsCaseSensitive(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	refs := PattyGraph.refsMatcher
+	refs.currentListing = []string{"Filter", "filter"}
+	PattyGraph.selectedInterestingMatcher = nil
+
+	upper := invokeInlineCommand("!!! select --refs Filter")
+	if upper.Status != InlineCommandStatusApplied {
+		t.Fatalf("upper status = %q, want %q", upper.Status, InlineCommandStatusApplied)
+	}
+	if upper.Result["selection"] != "Filter" {
+		t.Fatalf("upper selection = %v, want Filter", upper.Result["selection"])
+	}
+	if refs.selectedKey != "Filter" {
+		t.Fatalf("selectedKey = %q, want Filter", refs.selectedKey)
+	}
+
+	lower := invokeInlineCommand("!!! select --refs filter")
+	if lower.Status != InlineCommandStatusApplied {
+		t.Fatalf("lower status = %q, want %q", lower.Status, InlineCommandStatusApplied)
+	}
+	if lower.Result["selection"] != "filter" {
+		t.Fatalf("lower selection = %v, want filter", lower.Result["selection"])
+	}
+	if refs.selectedKey != "filter" {
+		t.Fatalf("selectedKey = %q, want filter", refs.selectedKey)
+	}
+}
+
 func TestInlineControlCommandTogglesControlFileProcessing(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	enableControlFile = false

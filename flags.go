@@ -358,14 +358,23 @@ Inject lines to manage pattyGraph operation:
 NOTE: Single quotes avoid shell command expansion
 
 Matcher Commands:
-  !!! add <name> <pattern>...
+  !!! add <flag*> <name> <pattern>...
+        valid flags: --refs, --words, or --ips
       Add a matcher with one or more text patterns. Quoted patterns allowed.
+      If a flag is given that 'interesting' scope is used.
   !!! del <name> 
       Delete a matcher (text after <name> is ignored).
   !!! color <name> <color>
       Assign a named matcher a specific display color. See '--help colors'.
   !!! mode <name> <0|1|2>
       Set named matcher match information expansion from 0-minimal to 2-all
+  !!! select
+      Clear the current interesting-item selection.
+  !!! select <flag> <key>
+        valid flags: --refs, --words, or --ips.
+      Select the first matching interesting item. 
+      A flag must be used to indicate scope
+
 
 Matcher names can be prefixed with a modifier to control placement:
   +name → Add matcher at the top of the list.
@@ -385,6 +394,8 @@ Configuration Settings:
 Misc Commands:
   !!! popBots
       Forces Bots to fork its top Bot match as new matcher
+  !!! purge
+      Clears all peak words
   !!! demo
       Advances tab view once every 10 seconds. Tab stops progression.
   !!! ticker

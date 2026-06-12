@@ -1308,6 +1308,43 @@ func (m *InterestingWordMatcher) selectDisplayItem(selectionIndex int) {
 	}
 }
 
+func (m *InterestingWordMatcher) selectDisplayItemByKey(selection string) (int, bool) {
+	if m == nil {
+		return -1, false
+	}
+	if len(m.currentListing) == 0 {
+		m.displayString()
+	}
+	if len(m.currentListing) == 0 {
+		return -1, false
+	}
+	needle := strings.TrimSpace(selection)
+	if needle == "" {
+		m.selectDisplayItem(-1)
+		return -1, true
+	}
+	exactIdx := -1
+	partialIdx := -1
+	for i, key := range m.currentListing {
+		if key == needle {
+			exactIdx = i
+			break
+		}
+		if partialIdx == -1 && strings.Contains(key, needle) {
+			partialIdx = i
+		}
+	}
+	idx := exactIdx
+	if idx == -1 {
+		idx = partialIdx
+	}
+	if idx == -1 {
+		return -1, false
+	}
+	m.selectDisplayItem(idx)
+	return idx, true
+}
+
 // secondaryEntryMetric is the extra info displayed on the right side of every entry
 // TODO: Tab cycles through current, countPlusFirst+last, historyDepth
 func (m *InterestingWordMatcher) secondaryEntryMetric(stats *WordStats, nDenom float64) string {

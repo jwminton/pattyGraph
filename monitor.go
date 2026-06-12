@@ -722,7 +722,52 @@ func invokeInlineCommand(line string) InlineCommandResult {
 		result.Result["patterns"] = patterns
 		result.Result["regex"] = isRegex
 		return result
+	case "select", "SELECT":
+		args, err := splitArgsShellStyle(commandLine[len(cmd):])
+		if err != nil {
+			return inlineCommandRejected(cmd, "select_interesting", "missing scope or selection")
+		}
+		if len(args) == 0 {
+			if PattyGraph.selectedInterestingMatcher != nil {
+				PattyGraph.selectedInterestingMatcher.selectedKey = ""
+				PattyGraph.selectedInterestingMatcher.selectedGraphCache = ""
+				PattyGraph.selectedInterestingMatcher = nil
+			}
+			return inlineCommandResult(cmd, InlineCommandStatusApplied, "clear_selection")
+		}
+		if len(args) < 2 {
+			return inlineCommandRejected(cmd, "select_interesting", "missing selection key")
+		}
 
+		scope := strings.ToLower(strings.TrimLeft(args[0], "-"))
+		selection := strings.TrimSpace(strings.Join(args[1:], " "))
+
+		var target *InterestingWordMatcher
+		switch scope {
+		case "words":
+			target = PattyGraph.wordsMatcher
+		case "refs":
+			target = PattyGraph.refsMatcher
+		case "ips":
+			target = PattyGraph.ipsMatcher
+		default:
+			return inlineCommandRejected(cmd, "select_interesting", "unsupported selection scope")
+		}
+
+		if target == nil {
+			return inlineCommandRejected(cmd, "select_interesting", "selection target unavailable")
+		}
+
+		idx, ok := target.selectDisplayItemByKey(selection)
+		if !ok {
+			return inlineCommandRejected(cmd, "select_interesting", "selection not found")
+		}
+
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "select_interesting")
+		result.Result["matcher"] = target.mName
+		result.Result["selection"] = target.selectionKey()
+		result.Result["selection_index"] = idx
+		return result
 	case "DEL", "del", "delete", "DELETE":
 		if len(tokens) < 2 {
 			return inlineCommandRejected(cmd, "delete_matcher", "missing matcher name")
