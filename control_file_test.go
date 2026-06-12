@@ -5,6 +5,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,33 @@ func TestShouldProcessControlLineGatesCommands(t *testing.T) {
 	}
 	if shouldProcessControlLine("!!! control off") {
 		t.Fatal("disabled control file processed control off")
+	}
+}
+
+func TestControlFileStartMarkerIsCommentAndIgnoredAsCommand(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	enableControlFile = true
+	PattyGraph.filePath = "./access.log"
+	PattyGraph.pattyConfig.saveDir = "./splats"
+
+	marker := controlFileStartMarker()
+
+	if !strings.HasPrefix(marker, "# ") {
+		t.Fatalf("marker = %q, want comment line", marker)
+	}
+	if shouldProcessControlLine(marker) {
+		t.Fatalf("marker %q was treated as an inline command", marker)
+	}
+	wantParts := []string{
+		"pattyGraph control ready",
+		"session_id=" + sidecarSessionID,
+		"control_file_enabled=true",
+		"file_path=\"./access.log\"",
+		"sidecar_path=\"splats/sidecar_",
+	}
+	for _, want := range wantParts {
+		if !strings.Contains(marker, want) {
+			t.Fatalf("marker %q does not contain %q", marker, want)
+		}
 	}
 }

@@ -160,3 +160,52 @@ func TestSidecarSelectedContextIncludesSelectedWordLines(t *testing.T) {
 		t.Fatalf("last source log line = %q", selected.LastSource.LogLine)
 	}
 }
+
+func TestSidecarSessionStartIncludesControlFileMetadata(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	enableControlFile = true
+	PattyGraph.pattyConfig.saveDir = "/tmp/patty"
+
+	event := PattyGraph.SidecarSessionStart()
+
+	if !event.InlineCommandsEnabled {
+		t.Fatal("InlineCommandsEnabled = false, want true")
+	}
+	if !event.ControlFileEnabled {
+		t.Fatal("ControlFileEnabled = false, want true")
+	}
+	if event.ControlFilePath != "/tmp/patty/pattyControl.log" {
+		t.Fatalf("ControlFilePath = %q, want /tmp/patty/pattyControl.log", event.ControlFilePath)
+	}
+}
+
+func TestSidecarControlCommandIncludesControlFileMetadata(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	enableControlFile = true
+	PattyGraph.pattyConfig.saveDir = "/tmp/patty"
+	result := invokeInlineCommand("!!! add ip-91 --ips 91.99.72.15")
+
+	event := PattyGraph.SidecarControlCommand("!!! add ip-91 --ips 91.99.72.15", "control_file", result)
+
+	if event.EventType != SidecarEventControlCommand {
+		t.Fatalf("EventType = %q, want %q", event.EventType, SidecarEventControlCommand)
+	}
+	if event.Source != "control_file" {
+		t.Fatalf("Source = %q, want control_file", event.Source)
+	}
+	if event.CommandName != "add" {
+		t.Fatalf("CommandName = %q, want add", event.CommandName)
+	}
+	if event.Status != InlineCommandStatusApplied {
+		t.Fatalf("Status = %q, want %q", event.Status, InlineCommandStatusApplied)
+	}
+	if !event.ControlFileEnabled {
+		t.Fatal("ControlFileEnabled = false, want true")
+	}
+	if event.ControlFilePath != "/tmp/patty/pattyControl.log" {
+		t.Fatalf("ControlFilePath = %q, want /tmp/patty/pattyControl.log", event.ControlFilePath)
+	}
+	if event.Result["action"] != "add_matcher" {
+		t.Fatalf("result action = %v, want add_matcher", event.Result["action"])
+	}
+}

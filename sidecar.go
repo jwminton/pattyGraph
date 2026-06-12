@@ -18,9 +18,10 @@ const (
 	SidecarPhaseBeforePush = "before_push"
 	SidecarPhaseAfterPush  = "after_push"
 
-	SidecarEventSessionStart = "session_start"
-	SidecarEventInterval     = "interval"
-	SidecarSchemaVersion     = 2
+	SidecarEventSessionStart   = "session_start"
+	SidecarEventInterval       = "interval"
+	SidecarEventControlCommand = "control_command"
+	SidecarSchemaVersion       = 2
 
 	SidecarMarkedStateMarked   = "marked"
 	SidecarMarkedStateUnmarked = "unmarked"
@@ -80,17 +81,34 @@ type SidecarInterval struct {
 }
 
 type SidecarSessionStart struct {
-	SchemaVersion int       `json:"schema_version"`
-	EventType     string    `json:"event_type"`
-	SessionID     string    `json:"session_id"`
-	Timestamp     time.Time `json:"timestamp"`
-	FilePath      string    `json:"file_path"`
-	Machine       string    `json:"machine,omitempty"`
-	ProcessID     int       `json:"process_id"`
-	Version       string    `json:"version,omitempty"`
-	SaveDir       string    `json:"save_dir,omitempty"`
-	Args          []string  `json:"args,omitempty"`
-	OutputPath    string    `json:"output_path,omitempty"`
+	SchemaVersion         int       `json:"schema_version"`
+	EventType             string    `json:"event_type"`
+	SessionID             string    `json:"session_id"`
+	Timestamp             time.Time `json:"timestamp"`
+	FilePath              string    `json:"file_path"`
+	Machine               string    `json:"machine,omitempty"`
+	ProcessID             int       `json:"process_id"`
+	Version               string    `json:"version,omitempty"`
+	SaveDir               string    `json:"save_dir,omitempty"`
+	Args                  []string  `json:"args,omitempty"`
+	OutputPath            string    `json:"output_path,omitempty"`
+	InlineCommandsEnabled bool      `json:"inline_commands_enabled"`
+	ControlFileEnabled    bool      `json:"control_file_enabled"`
+	ControlFilePath       string    `json:"control_file_path,omitempty"`
+}
+
+type SidecarControlCommand struct {
+	SchemaVersion      int                    `json:"schema_version"`
+	EventType          string                 `json:"event_type"`
+	SessionID          string                 `json:"session_id"`
+	Timestamp          time.Time              `json:"timestamp"`
+	Source             string                 `json:"source"`
+	Command            string                 `json:"command"`
+	CommandName        string                 `json:"command_name,omitempty"`
+	Status             string                 `json:"status"`
+	ControlFileEnabled bool                   `json:"control_file_enabled"`
+	ControlFilePath    string                 `json:"control_file_path,omitempty"`
+	Result             map[string]interface{} `json:"result,omitempty"`
 }
 
 type SidecarSummary struct {
@@ -307,15 +325,18 @@ func (m *Monitor) SidecarSnapshot(opts SidecarOptions) SidecarInterval {
 
 func (m *Monitor) SidecarSessionStart() SidecarSessionStart {
 	event := SidecarSessionStart{
-		SchemaVersion: SidecarSchemaVersion,
-		EventType:     SidecarEventSessionStart,
-		SessionID:     sidecarSessionID,
-		Timestamp:     time.Now(),
-		FilePath:      m.filePath,
-		Machine:       machineDisplayName,
-		ProcessID:     os.Getpid(),
-		Version:       PattyGraphVersion,
-		Args:          copyStringSlice(os.Args),
+		SchemaVersion:         SidecarSchemaVersion,
+		EventType:             SidecarEventSessionStart,
+		SessionID:             sidecarSessionID,
+		Timestamp:             time.Now(),
+		FilePath:              m.filePath,
+		Machine:               machineDisplayName,
+		ProcessID:             os.Getpid(),
+		Version:               PattyGraphVersion,
+		Args:                  copyStringSlice(os.Args),
+		InlineCommandsEnabled: true,
+		ControlFileEnabled:    enableControlFile,
+		ControlFilePath:       controlFilePath(),
 	}
 	if m != nil && m.pattyConfig != nil {
 		event.SaveDir = m.pattyConfig.saveDir
@@ -333,6 +354,26 @@ func (m *Monitor) SidecarDefaultPath() string {
 
 func (m *Monitor) WriteSidecarSessionStartJSONL(path string) error {
 	return m.writeSidecarEventJSONL(m.SidecarSessionStart(), path)
+}
+
+func (m *Monitor) SidecarControlCommand(command string, source string, result InlineCommandResult) SidecarControlCommand {
+	return SidecarControlCommand{
+		SchemaVersion:      SidecarSchemaVersion,
+		EventType:          SidecarEventControlCommand,
+		SessionID:          sidecarSessionID,
+		Timestamp:          time.Now(),
+		Source:             source,
+		Command:            command,
+		CommandName:        result.CommandName,
+		Status:             result.Status,
+		ControlFileEnabled: enableControlFile,
+		ControlFilePath:    controlFilePath(),
+		Result:             result.Result,
+	}
+}
+
+func (m *Monitor) WriteSidecarControlCommandJSONL(command string, source string, result InlineCommandResult, path string) error {
+	return m.writeSidecarEventJSONL(m.SidecarControlCommand(command, source, result), path)
 }
 
 func (m *Monitor) WriteSidecarJSONL(snapshot SidecarInterval, path string) error {
@@ -833,9 +874,14 @@ JSONL Record types:
       Its timestamp is the log-derived time PattyGraph read from the access log,
       not wall-clock process time.
 
+  control_command
+      Immediate acknowledgement for a command consumed from pattyControl.log.
+      Contains command text, source, status, control_file_enabled,
+      control_file_path, and structured result metadata.
+
 Important fields:
   schema_version   Version of the sidecar JSON schema.
-  event_type       session_start or interval.
+  event_type       session_start, interval, or control_command.
   session_id       Stable id shared by all records in one file.
   timestamp        Wall time for session_start; log time for interval records.
   interval         PattyGraph interval number.

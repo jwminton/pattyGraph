@@ -111,3 +111,42 @@ func TestInlineControlCommandTogglesControlFileProcessing(t *testing.T) {
 		t.Fatal("enableControlFile = false after !!! control on, want true")
 	}
 }
+
+func TestInlineAddScopedIPReturnsResult(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! add ip-91 --ips 91.99.72.15")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q", result.Status, InlineCommandStatusApplied)
+	}
+	if result.Result["action"] != "add_matcher" {
+		t.Fatalf("action = %v, want add_matcher", result.Result["action"])
+	}
+	if result.Result["matcher_name"] != "ip-91" {
+		t.Fatalf("matcher_name = %v, want ip-91", result.Result["matcher_name"])
+	}
+	if result.Result["scope"] != "ips" {
+		t.Fatalf("scope = %v, want ips", result.Result["scope"])
+	}
+	patterns, ok := result.Result["patterns"].([]string)
+	if !ok || len(patterns) != 1 || patterns[0] != "91.99.72.15" {
+		t.Fatalf("patterns = %#v, want [91.99.72.15]", result.Result["patterns"])
+	}
+}
+
+func TestInlineBadAddReturnsRejectedResult(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! add")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q", result.Status, InlineCommandStatusRejected)
+	}
+	if result.Result["action"] != "add_matcher" {
+		t.Fatalf("action = %v, want add_matcher", result.Result["action"])
+	}
+	if result.Result["error"] == "" {
+		t.Fatal("error was empty")
+	}
+}

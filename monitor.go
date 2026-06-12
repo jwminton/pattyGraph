@@ -565,13 +565,39 @@ func match(line string) {
 	poolGetsMap[int(poolGetsThisCall)]++
 }
 
-func invokeInlineCommand(line string) {
+const (
+	InlineCommandStatusApplied  = "applied"
+	InlineCommandStatusIgnored  = "ignored"
+	InlineCommandStatusRejected = "rejected"
+	InlineCommandStatusError    = "error"
+)
+
+type InlineCommandResult struct {
+	CommandName string
+	Status      string
+	Result      map[string]interface{}
+}
+
+func inlineCommandResult(commandName string, status string, action string) InlineCommandResult {
+	return InlineCommandResult{
+		CommandName: strings.ToLower(commandName),
+		Status:      status,
+		Result:      map[string]interface{}{"action": action},
+	}
+}
+
+func inlineCommandRejected(commandName string, action string, message string) InlineCommandResult {
+	result := inlineCommandResult(commandName, InlineCommandStatusRejected, action)
+	result.Result["error"] = message
+	return result
+}
+
+func invokeInlineCommand(line string) InlineCommandResult {
 	// Assume '!!! ' prefix already detected
 	commandLine := line[4:]
 	tokens := strings.Fields(commandLine)
 	if len(tokens) == 0 {
-		//log.Printf("Empty inline command")
-		return
+		return inlineCommandResult("", InlineCommandStatusIgnored, "empty")
 	}
 
 	cmd := tokens[0]
@@ -582,7 +608,7 @@ func invokeInlineCommand(line string) {
 		// Parse command logLine with quote handling
 		args, err := splitArgsShellStyle(commandLine[len(cmd):])
 		if err != nil || len(args) < 1 {
-			return
+			return inlineCommandRejected(cmd, "add_matcher", "missing matcher name")
 		}
 
 		isRegex := false
@@ -664,31 +690,42 @@ func invokeInlineCommand(line string) {
 			}
 		}
 		if newM == nil {
-			return
+			return inlineCommandRejected(cmd, "add_matcher", "matcher was not created")
 		}
 		newM.inlineCommandAction = func() string {
 			return line
 		}
+		placement := "before_bots"
 		switch originalName[0:1] {
 		case "*":
+			placement = "before_lines"
 			PattyGraph.matchers = insertMatcherBeforeLines(PattyGraph.matchers, newM)
 		case "+":
+			placement = "first"
 			PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, newM)
 		case "-":
+			placement = "before_bots"
 			PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, newM)
 		default:
 			if len(newM.history) > 0 {
+				placement = "first"
 				PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, newM)
 			} else {
 				PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, newM)
 			}
 		}
 		botsIndex = botsMatcherIndex()
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "add_matcher")
+		result.Result["matcher_name"] = name
+		result.Result["placement"] = placement
+		result.Result["scope"] = scopeName
+		result.Result["patterns"] = patterns
+		result.Result["regex"] = isRegex
+		return result
 
 	case "DEL", "del", "delete", "DELETE":
 		if len(tokens) < 2 {
-			//log.Printf("Invalid DELETE_MATCHER usage: %s", commandLine)
-			return
+			return inlineCommandRejected(cmd, "delete_matcher", "missing matcher name")
 		}
 		fromTop := true
 		name := tokens[1]
@@ -707,20 +744,23 @@ func invokeInlineCommand(line string) {
 		}
 		removeMatcherFromTop(name, fromTop)
 		botsIndex = botsMatcherIndex()
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "delete_matcher")
+		result.Result["matcher_name"] = name
+		result.Result["from_top"] = fromTop
+		return result
 
 	case "mode", "MODE":
 		if len(tokens) < 2 {
-			//log.Printf("Invalid DELETE_MATCHER usage: %s", commandLine)
-			return
+			return inlineCommandRejected(cmd, "set_matcher_mode", "missing matcher name")
 		}
 		name := tokens[1]
 		args, err := splitArgsShellStyle(commandLine[len(cmd):])
-		if err != nil || len(args) < 1 {
-			return
+		if err != nil || len(args) < 2 {
+			return inlineCommandRejected(cmd, "set_matcher_mode", "missing mode")
 		}
 		newMode, e := strconv.Atoi(args[1])
 		if e != nil {
-			return
+			return inlineCommandRejected(cmd, "set_matcher_mode", "invalid mode")
 		}
 		setMatcherMode(name, newMode)
 		// being nice for users doing a quick edit at the cli
@@ -735,11 +775,15 @@ func invokeInlineCommand(line string) {
 		} else if name[0:1] == "-" {
 			name = name[1:]
 		}
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_matcher_mode")
+		result.Result["matcher_name"] = name
+		result.Result["mode"] = newMode
+		return result
 
 	case "COLOR", "color":
 		if len(tokens) < 3 {
 			log.Printf("Invalid SET_COLOR usage: %s", commandLine)
-			return
+			return inlineCommandRejected(cmd, "set_matcher_color", "missing matcher name or color")
 		}
 		name := tokens[1]
 		color := tokens[2]
@@ -757,25 +801,47 @@ func invokeInlineCommand(line string) {
 			color = "[" + color + "]"
 		}
 		reassignMatcherColor(name, color)
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_matcher_color")
+		result.Result["matcher_name"] = name
+		result.Result["color"] = color
+		return result
 
 	case "fact":
 		if len(tokens) < 2 {
-			return
+			return inlineCommandRejected(cmd, "show_fact", "missing fact name")
 		}
 		args, _ := splitArgsShellStyle(commandLine[len(cmd):])
 		f := args[0]
 		pushFactNow(f, args[1:])
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "show_fact")
+		result.Result["fact"] = f
+		return result
 	// === Live Actions (No args) ===
 	case "demo", "DEMO":
 		PattyGraph.demo = !PattyGraph.demo
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "toggle_demo")
+		result.Result["enabled"] = PattyGraph.demo
+		return result
 	case "facts.rnd", "FACTS.RND":
 		doRandom = !doRandom
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "toggle_random_facts")
+		result.Result["enabled"] = doRandom
+		return result
 	case "ticker", "TICKER":
 		PattyGraph.showTicker = !PattyGraph.showTicker
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "toggle_ticker")
+		result.Result["enabled"] = PattyGraph.showTicker
+		return result
 	case "history", "HISTORY":
 		showMetricsPanelContents = !showMetricsPanelContents
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "toggle_fact_history")
+		result.Result["enabled"] = showMetricsPanelContents
+		return result
 	case "expert", "EXPERT":
 		expertMode = !expertMode
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "toggle_expert")
+		result.Result["enabled"] = expertMode
+		return result
 	case "control", "CONTROL":
 		value := "on"
 		if len(tokens) >= 2 {
@@ -785,29 +851,43 @@ func invokeInlineCommand(line string) {
 			}
 		}
 		SetFlagByName("control", value)
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_control_file_enabled")
+		result.Result["value"] = enableControlFile
+		return result
 	case "purge", "PURGE":
 		// TODO: can take optional matcher name
 		purgePeakWordCommand()
+		return inlineCommandResult(cmd, InlineCommandStatusApplied, "purge")
 	case "pattySplat", "pattysplat", "PATTYSPLAT":
 		pattySplat()
+		return inlineCommandResult(cmd, InlineCommandStatusApplied, "write_splat")
 	case "popBots", "popbots", "POPBOTS":
 		PattyGraph.botsMatcher.migrateBots(-1)
+		return inlineCommandResult(cmd, InlineCommandStatusApplied, "pop_bots")
 	case "compact":
 		compactCaches()
+		return inlineCommandResult(cmd, InlineCommandStatusApplied, "compact_caches")
 	case "dumpConfig", "dumpconfig", "DUMPCONFIG":
 		dumpConfig()
+		return inlineCommandResult(cmd, InlineCommandStatusApplied, "write_config")
 	default:
 		// === Property Settings (single arg) ===
 		if len(tokens) < 2 {
 			log.Printf("Missing value for property %s", cmd)
-			return
+			return inlineCommandRejected(cmd, "set_flag", "missing value")
 		}
 		args, _ := splitArgsShellStyle(commandLine[len(cmd):])
 		value := args[0]
 		if !SetFlagByName(cmd, value) {
 			log.Printf("Unknown inline command: %s", commandLine)
+			return inlineCommandRejected(cmd, "unknown", "unknown inline command")
 		}
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_flag")
+		result.Result["name"] = strings.ToLower(cmd)
+		result.Result["value"] = value
+		return result
 	}
+	return inlineCommandResult(cmd, InlineCommandStatusIgnored, "noop")
 }
 
 func setMatcherMode(name string, newMode int) {
@@ -1788,6 +1868,10 @@ func layoutUI() {
 var lineCh chan string
 var controlFileMonitorStarted bool
 
+func controlFileStartMarker() string {
+	return fmt.Sprintf("# pattyGraph control ready session_id=%s control_file_enabled=%t file_path=%q sidecar_path=%q", sidecarSessionID, enableControlFile, PattyGraph.filePath, PattyGraph.SidecarDefaultPath())
+}
+
 func controlFilePath() string {
 	if PattyGraph.pattyConfig.saveDir != "" {
 		return filepath.Join(PattyGraph.pattyConfig.saveDir, "pattyControl.log")
@@ -1835,6 +1919,11 @@ func startControlFileMonitoring() {
 		log.Printf("Failed to create control file %s: %v", path, err)
 		return
 	}
+	if _, err := fmt.Fprintln(f, controlFileStartMarker()); err != nil {
+		log.Printf("Failed to write control file marker %s: %v", path, err)
+		_ = f.Close()
+		return
+	}
 	if err := f.Close(); err != nil {
 		log.Printf("Failed to close control file %s: %v", path, err)
 		return
@@ -1859,7 +1948,12 @@ func startControlFileMonitoring() {
 				continue
 			}
 			mu.Lock()
-			invokeInlineCommand(text)
+			result := invokeInlineCommand(text)
+			if generateSidecarJSONL {
+				if err := PattyGraph.WriteSidecarControlCommandJSONL(text, "control_file", result, ""); err != nil {
+					log.Printf("sidecar control command write failed: %v", err)
+				}
+			}
 			mu.Unlock()
 		}
 	}()
