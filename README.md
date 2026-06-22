@@ -2,9 +2,14 @@
 
 ## New in v0.1.3: AI-Assisted Operation Help
 
-  PattyGraph now includes `--help ai`, a dedicated guide for running AI-assisted analysis sessions. This is help specifically written for the controlling AI Agent/Session or any automated process to understand the intended workflow. It documents
-  the recommended tmux workflow, use of --json PattyLog output, --control inline commands, pattySplat snapshots,
-  and targeted raw-log searches for safer live traffic investigation.
+  PattyGraph now includes `--help ai`, a dedicated guide for running AI-assisted analysis sessions. This is help specifically written for the controlling AI Agent/Session or any automated process to understand the intended workflow. 
+  
+  It documents
+*   the recommended tmux workflow
+*   use of --json PattyLog output
+*   use of --control inline commands
+*   pattySplat snapshots
+*   targeted raw-log searches for safer live traffic investigation.
 
 
 ## New in v0.1.2: Live Terminal Triage, Now with JSONL Sidecar Output
