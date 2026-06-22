@@ -21,7 +21,8 @@ const (
 	PattyGraphAuthor    = "Jasen Minton"
 	PattyGraphGithubUrl = "https://github.com/jwminton/pattyGraph"
 	PattyGraphName      = "PattyGraph"
-	PattyGraphVersion   = "0.1.2"
+	// NOTE: PattyGraphVersion is used by compile.sh for repackaging labeling
+	PattyGraphVersion = "0.1.3"
 
 	PattyOrange             = "#FFA96F"
 	PattyBotsColor          = "[#A0FFFF]"

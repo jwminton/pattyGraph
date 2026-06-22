@@ -927,8 +927,10 @@ Human attach pattern:
 Recommended help topics to inspect before operating:
 
   ./pattyGraph --help
-  ./pattyGraph --help jsonl
+  ./pattyGraph --help json
   ./pattyGraph --help inline
+
+Less important topics
   ./pattyGraph --help layout
   ./pattyGraph --help words
   ./pattyGraph --help facts
@@ -1021,7 +1023,7 @@ Inline commands begin with:
   !!!
 
 Use inline commands through pattyControl.log when --control is enabled, or in
-config files before data ingestion. See --help inline for the full command set.
+config files before data ingestion. See '--help inline' for the full command set.
 
 To issue an inline command:
 Example inline command issued to create a pattySplat:
@@ -1036,6 +1038,8 @@ Selection workflow:
      !!! select --refs some_token
      !!! select --words some_token
      !!! select --ips 203.0.113.10
+     # or to clear selection
+     !!! select
 
 2. Read the pattyLog control_command record to confirm the command was applied.
 3. Read the next interval record for selected context and source-line metadata.
