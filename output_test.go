@@ -59,6 +59,50 @@ func TestWriteConfigEmitsActiveModeAndColorLines(t *testing.T) {
 	}
 }
 
+func TestWriteConfigEmitsAlertLines(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! alert errs above 50")
+	invokeInlineCommand("!!! alert Bots below 1")
+
+	var buf bytes.Buffer
+	writeConfig(&buf)
+	out := buf.String()
+
+	if !strings.Contains(out, "!!! alert errs above 50\n") {
+		t.Fatalf("config did not contain errs above alert:\n%s", out)
+	}
+	if !strings.Contains(out, "!!! alert Bots below 1\n") {
+		t.Fatalf("config did not contain Bots below alert:\n%s", out)
+	}
+}
+
+func TestWriteConfigQuotesAlertMatcherNamesWithSpaces(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	add := invokeInlineCommand(`!!! add "My Bot"`)
+	if add.Status != InlineCommandStatusApplied {
+		t.Fatalf("add status = %q, want applied: %#v", add.Status, add.Result)
+	}
+	alert := invokeInlineCommand(`!!! alert "My Bot" above 5`)
+	if alert.Status != InlineCommandStatusApplied {
+		t.Fatalf("alert status = %q, want applied: %#v", alert.Status, alert.Result)
+	}
+
+	var buf bytes.Buffer
+	writeConfig(&buf)
+	out := buf.String()
+
+	if !strings.Contains(out, "!!! alert 'My Bot' above 5\n") {
+		t.Fatalf("config did not quote spaced matcher alert:\n%s", out)
+	}
+
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand(`!!! add "My Bot"`)
+	reloaded := invokeInlineCommand(`!!! alert 'My Bot' above 5`)
+	if reloaded.Status != InlineCommandStatusApplied {
+		t.Fatalf("quoted alert reload status = %q, want applied: %#v", reloaded.Status, reloaded.Result)
+	}
+}
+
 func TestPrintToFileStripsColorTags(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	dir := t.TempDir()

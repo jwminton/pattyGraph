@@ -20,7 +20,8 @@ const (
 	SidecarEventSessionStart   = "session_start"
 	SidecarEventInterval       = "interval"
 	SidecarEventControlCommand = "control_command"
-	SidecarSchemaVersion       = 2
+	SidecarEventAlert          = "alert"
+	SidecarSchemaVersion       = 3
 
 	SidecarMarkedStateMarked   = "marked"
 	SidecarMarkedStateUnmarked = "unmarked"
@@ -108,6 +109,22 @@ type SidecarControlCommand struct {
 	ControlFileEnabled bool                   `json:"control_file_enabled"`
 	ControlFilePath    string                 `json:"control_file_path,omitempty"`
 	Result             map[string]interface{} `json:"result,omitempty"`
+}
+
+type SidecarAlert struct {
+	SchemaVersion int       `json:"schema_version"`
+	EventType     string    `json:"event_type"`
+	SessionID     string    `json:"session_id"`
+	Timestamp     time.Time `json:"timestamp"`
+	Status        string    `json:"status"`
+	Matcher       string    `json:"matcher"`
+	Direction     string    `json:"direction"`
+	Value         int       `json:"value"`
+	Threshold     int       `json:"threshold"`
+	FluxDepth     int       `json:"flux_depth"`
+	Streak        int       `json:"streak"`
+	Interval      int       `json:"interval"`
+	CurrentCycle  int       `json:"current_cycle"`
 }
 
 type SidecarSummary struct {
@@ -373,6 +390,28 @@ func (m *Monitor) SidecarControlCommand(command string, source string, result In
 
 func (m *Monitor) WriteSidecarControlCommandJSONL(command string, source string, result InlineCommandResult, path string) error {
 	return m.writeSidecarEventJSONL(m.SidecarControlCommand(command, source, result), path)
+}
+
+func (m *Monitor) SidecarAlert(transition AlertTransition) SidecarAlert {
+	return SidecarAlert{
+		SchemaVersion: SidecarSchemaVersion,
+		EventType:     SidecarEventAlert,
+		SessionID:     sidecarSessionID,
+		Timestamp:     sidecarEventTime(m),
+		Status:        transition.Status,
+		Matcher:       transition.MatcherName,
+		Direction:     transition.Direction,
+		Value:         transition.Value,
+		Threshold:     transition.Threshold,
+		FluxDepth:     transition.FluxDepth,
+		Streak:        transition.Streak,
+		Interval:      transition.Interval,
+		CurrentCycle:  transition.CurrentCycle,
+	}
+}
+
+func (m *Monitor) WriteSidecarAlertJSONL(transition AlertTransition, path string) error {
+	return m.writeSidecarEventJSONL(m.SidecarAlert(transition), path)
 }
 
 func (m *Monitor) WriteSidecarJSONL(snapshot SidecarInterval, path string) error {
@@ -878,9 +917,14 @@ JSONL Record types:
       Contains command text, source, status, control_file_enabled,
       control_file_path, and structured result metadata.
 
+  alert
+      Matcher alert transition. Written when a configured matcher alert bound
+      is triggered or recovered. Manual alert configuration changes are recorded
+      as control_command events.
+
 Important fields:
   schema_version   Version of the pattyLog JSON schema.
-  event_type       session_start, interval, or control_command.
+  event_type       session_start, interval, control_command, or alert.
   session_id       Stable id shared by all records in one file.
   timestamp        Wall time for session_start; log time for interval records.
   interval         PattyGraph interval number.

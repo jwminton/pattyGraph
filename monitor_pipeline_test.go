@@ -17,6 +17,7 @@ func setupMonitorPipelineTestGraph() {
 	botsMigrated = 0
 	logicalCycles = 0
 	currentCycle = 0
+	fluxDepth = DefaultFluxDepth
 	*currentLine = lineSource{}
 }
 

@@ -64,6 +64,8 @@ type Matcher struct {
 	lastIntervalCount   int
 	lastCycleCount      int
 	bytesServed         int
+	AlertAbove          AlertBound
+	AlertBelow          AlertBound
 
 	matchedDisplayCount int // cache for how many subgroups printed for click selection later
 
@@ -317,6 +319,8 @@ func (m *Matcher) push() {
 	// TODO: I want to reverse this appending direction someday
 	//       Reversing has graphing and WordStats implications
 	//       WordStats did it right and reverses itself when graphing
+	m.evaluateAlertBounds()
+
 	// Append the current intervalCount to history
 	m.history = append(m.history, m.intervalCount)
 

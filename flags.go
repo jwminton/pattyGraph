@@ -377,6 +377,49 @@ Matcher Commands:
         valid flags: --refs, --words, or --ips.
       Select the first matching interesting item in the given scope. Exact match.
       A flag must be used to indicate scope
+  !!! alert <name> above <count>
+      Trigger when matcher count is count or higher for flux-depth consecutive
+      intervals. Recovers after flux-depth consecutive intervals below count.
+  !!! alert <name> below <count>
+      Trigger when matcher count is below count for flux-depth consecutive
+      intervals. Recovers after flux-depth consecutive intervals at or above count.
+      below 1 is the way to alert on zero hits.
+  !!! alert <name>
+      Show current alert settings and state for a matcher.
+  !!! alert <name> clear [above|below]
+      Clear both alert bounds or only the requested bound.
+  !!! alerts
+      Report currently triggered alert bounds across all matchers.
+
+Alert Notes:
+  Alerts attach simple bounds to existing matchers. They evaluate once per
+  interval when matcher counts are pushed.
+
+  above N means N or more hits in an interval.
+  below N means fewer than N hits in an interval.
+
+  A bound must be true for flux-depth consecutive intervals before it triggers.
+  A triggered bound must be false for flux-depth consecutive intervals before it
+  recovers. Manual clear resets alert state and is recorded as a control command;
+  it does not emit a recovered alert event.
+
+  Each matcher can have one above bound and one below bound. If both are set,
+  the below threshold must be less than or equal to the above threshold.
+
+  Alert transitions are written to PattyLog JSONL as event_type "alert" records
+  with status "triggered" or "recovered".
+
+Examples:
+  !!! alert errs above 50
+      Alert when errs reaches 50 or more for flux-depth consecutive intervals.
+  !!! alert Googlebot below 1
+      Alert when Googlebot has zero hits for flux-depth consecutive intervals.
+  !!! alert Googlebot above 500
+      Also alert if Googlebot reaches 500 or more hits.
+  !!! alert Googlebot
+      Show Googlebot alert configuration and runtime state.
+  !!! alert Googlebot clear above
+      Remove only the above bound.
 
 
 Matcher names can be prefixed with a modifier to control placement:

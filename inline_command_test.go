@@ -197,6 +197,155 @@ func TestInlineControlCommandTogglesControlFileProcessing(t *testing.T) {
 	}
 }
 
+func TestInlineAlertSetShowAndRangeValidation(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	above := invokeInlineCommand("!!! alert errs above 50")
+	if above.Status != InlineCommandStatusApplied {
+		t.Fatalf("above status = %q, want applied: %#v", above.Status, above.Result)
+	}
+	if PattyGraph.errsMatcher.AlertAbove.Threshold != 50 {
+		t.Fatalf("above threshold = %d, want 50", PattyGraph.errsMatcher.AlertAbove.Threshold)
+	}
+
+	below := invokeInlineCommand("!!! alert errs below 10")
+	if below.Status != InlineCommandStatusApplied {
+		t.Fatalf("below status = %q, want applied: %#v", below.Status, below.Result)
+	}
+	if PattyGraph.errsMatcher.AlertBelow.Threshold != 10 {
+		t.Fatalf("below threshold = %d, want 10", PattyGraph.errsMatcher.AlertBelow.Threshold)
+	}
+
+	show := invokeInlineCommand("!!! alert errs")
+	if show.Status != InlineCommandStatusApplied {
+		t.Fatalf("show status = %q, want applied", show.Status)
+	}
+	if show.Result["action"] != "show_alert" {
+		t.Fatalf("show action = %v, want show_alert", show.Result["action"])
+	}
+	if show.Result["matcher"] != "errs" {
+		t.Fatalf("show matcher = %v, want errs", show.Result["matcher"])
+	}
+
+	overlap := invokeInlineCommand("!!! alert errs below 100")
+	if overlap.Status != InlineCommandStatusRejected {
+		t.Fatalf("overlap status = %q, want rejected", overlap.Status)
+	}
+	belowZero := invokeInlineCommand("!!! alert errs below 0")
+	if belowZero.Status != InlineCommandStatusRejected {
+		t.Fatalf("below zero status = %q, want rejected", belowZero.Status)
+	}
+}
+
+func TestMatcherAlertsTriggerRecoverAndListOnConsecutiveFluxDepth(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	fluxDepth = 2
+	invokeInlineCommand("!!! alert errs above 3")
+	errs := PattyGraph.errsMatcher
+
+	errs.intervalCount = 3
+	errs.push()
+	if len(PattyGraph.pendingAlertTransitions) != 0 {
+		t.Fatalf("pending transitions after first hit = %d, want 0", len(PattyGraph.pendingAlertTransitions))
+	}
+
+	errs.intervalCount = 4
+	errs.push()
+	if len(PattyGraph.pendingAlertTransitions) != 1 {
+		t.Fatalf("pending transitions after second hit = %d, want 1", len(PattyGraph.pendingAlertTransitions))
+	}
+	trigger := PattyGraph.pendingAlertTransitions[0]
+	if trigger.Status != AlertStatusTriggered || trigger.Direction != AlertDirectionAbove || trigger.Value != 4 || trigger.Threshold != 3 {
+		t.Fatalf("trigger transition = %#v", trigger)
+	}
+
+	alerts := invokeInlineCommand("!!! alerts")
+	active, ok := alerts.Result["active_alerts"].([]map[string]interface{})
+	if !ok || len(active) != 1 {
+		t.Fatalf("active alerts = %#v, want one alert", alerts.Result["active_alerts"])
+	}
+	if active[0]["matcher"] != "errs" || active[0]["direction"] != AlertDirectionAbove {
+		t.Fatalf("active alert = %#v", active[0])
+	}
+
+	PattyGraph.clearPendingAlertTransitions()
+	errs.intervalCount = 10
+	errs.push()
+	if len(PattyGraph.pendingAlertTransitions) != 0 {
+		t.Fatalf("pending transitions while still active = %d, want 0", len(PattyGraph.pendingAlertTransitions))
+	}
+
+	errs.intervalCount = 2
+	errs.push()
+	if len(PattyGraph.pendingAlertTransitions) != 0 {
+		t.Fatalf("pending transitions after first clear = %d, want 0", len(PattyGraph.pendingAlertTransitions))
+	}
+	errs.intervalCount = 0
+	errs.push()
+	if len(PattyGraph.pendingAlertTransitions) != 1 {
+		t.Fatalf("pending transitions after second clear = %d, want 1", len(PattyGraph.pendingAlertTransitions))
+	}
+	recovered := PattyGraph.pendingAlertTransitions[0]
+	if recovered.Status != AlertStatusRecovered || recovered.Direction != AlertDirectionAbove || recovered.Value != 0 {
+		t.Fatalf("recovered transition = %#v", recovered)
+	}
+}
+
+func TestInlineAlertClearActiveBoundDoesNotEmitRecovered(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	fluxDepth = 1
+	invokeInlineCommand("!!! alert errs below 1")
+	errs := PattyGraph.errsMatcher
+	errs.intervalCount = 0
+	errs.push()
+	if len(PattyGraph.pendingAlertTransitions) != 1 {
+		t.Fatalf("pending transitions after trigger = %d, want 1", len(PattyGraph.pendingAlertTransitions))
+	}
+	PattyGraph.clearPendingAlertTransitions()
+
+	clearResult := invokeInlineCommand("!!! alert errs clear below")
+	if clearResult.Status != InlineCommandStatusApplied {
+		t.Fatalf("clear status = %q, want applied", clearResult.Status)
+	}
+	if clearResult.Result["was_active"] != true {
+		t.Fatalf("was_active = %v, want true", clearResult.Result["was_active"])
+	}
+	if PattyGraph.errsMatcher.AlertBelow.Enabled || PattyGraph.errsMatcher.AlertBelow.Active {
+		t.Fatalf("below bound after clear = %#v", PattyGraph.errsMatcher.AlertBelow)
+	}
+	if len(PattyGraph.pendingAlertTransitions) != 0 {
+		t.Fatalf("pending transitions after manual clear = %d, want 0", len(PattyGraph.pendingAlertTransitions))
+	}
+}
+
+func TestFluxChangeResetsAlertRuntimeStateButKeepsBounds(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	fluxDepth = 1
+	invokeInlineCommand("!!! alert errs above 1")
+	errs := PattyGraph.errsMatcher
+	errs.intervalCount = 2
+	errs.push()
+	if !errs.AlertAbove.Active {
+		t.Fatal("above alert active = false, want true before flux change")
+	}
+	if len(PattyGraph.pendingAlertTransitions) != 1 {
+		t.Fatalf("pending transitions = %d, want 1 before flux change", len(PattyGraph.pendingAlertTransitions))
+	}
+
+	if !setFlux(3) {
+		t.Fatal("setFlux(3) = false, want true")
+	}
+	if !errs.AlertAbove.Enabled || errs.AlertAbove.Threshold != 1 {
+		t.Fatalf("above bound after flux change = %#v, want enabled threshold 1", errs.AlertAbove)
+	}
+	if errs.AlertAbove.Active || errs.AlertAbove.HitRun != 0 || errs.AlertAbove.ClearRun != 0 || errs.AlertAbove.LastValue != 0 {
+		t.Fatalf("above runtime state after flux change = %#v, want reset", errs.AlertAbove)
+	}
+	if len(PattyGraph.pendingAlertTransitions) != 0 {
+		t.Fatalf("pending transitions after flux change = %d, want 0", len(PattyGraph.pendingAlertTransitions))
+	}
+}
+
 func TestInlineAddScopedIPReturnsResult(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 

@@ -155,8 +155,9 @@ type Monitor struct {
 	demo                   bool
 	showTicker             bool
 	// metrics
-	totalAgentTokens uint64
-	unmarked         int
+	totalAgentTokens        uint64
+	unmarked                int
+	pendingAlertTransitions []AlertTransition
 }
 
 func NewMonitor(conf *MonitorConfig) *Monitor {
@@ -294,6 +295,31 @@ func push() {
 	PattyGraph.intervalLines = 0
 	PattyGraph.intervalsCompleted++
 	PattyGraph.unmarked = 0
+}
+
+func (m *Monitor) registerAlertTransition(t AlertTransition) {
+	if m == nil {
+		return
+	}
+	m.pendingAlertTransitions = append(m.pendingAlertTransitions, t)
+}
+
+func (m *Monitor) writePendingAlertTransitionsJSONL() {
+	if m == nil || !generateSidecarJSONL {
+		return
+	}
+	for _, transition := range m.pendingAlertTransitions {
+		if err := m.WriteSidecarAlertJSONL(transition, ""); err != nil {
+			log.Printf("PattyLog alert jsonl write failed: %v", err)
+		}
+	}
+}
+
+func (m *Monitor) clearPendingAlertTransitions() {
+	if m == nil {
+		return
+	}
+	m.pendingAlertTransitions = m.pendingAlertTransitions[:0]
 }
 
 func renderProgressBar() string {
@@ -861,6 +887,17 @@ func invokeInlineCommand(line string) InlineCommandResult {
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "show_fact")
 		result.Result["fact"] = f
 		return result
+	case "alert", "ALERT":
+		args, err := splitArgsShellStyle(commandLine[len(cmd):])
+		if err != nil || len(args) < 1 {
+			return inlineCommandRejected(cmd, "alert", "missing matcher name")
+		}
+		return invokeAlertCommand(cmd, args)
+	case "alerts", "ALERTS":
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "list_alerts")
+		result.Result["active_alerts"] = activeAlertStates()
+		result.Result["flux_depth"] = fluxDepth
+		return result
 	// === Live Actions (No args) ===
 	case "demo", "DEMO":
 		PattyGraph.demo = !PattyGraph.demo
@@ -933,6 +970,123 @@ func invokeInlineCommand(line string) InlineCommandResult {
 		return result
 	}
 	return inlineCommandResult(cmd, InlineCommandStatusIgnored, "noop")
+}
+
+func invokeAlertCommand(cmd string, args []string) InlineCommandResult {
+	matcher := findMatcherByName(args[0])
+	if matcher == nil {
+		return inlineCommandRejected(cmd, "alert", "matcher not found")
+	}
+	if len(args) == 1 {
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "show_alert")
+		for key, value := range matcher.alertState() {
+			result.Result[key] = value
+		}
+		return result
+	}
+
+	action := strings.ToLower(args[1])
+	switch action {
+	case AlertDirectionAbove, AlertDirectionBelow:
+		if len(args) < 3 {
+			return inlineCommandRejected(cmd, "set_alert", "missing threshold")
+		}
+		threshold, err := strconv.Atoi(args[2])
+		if err != nil {
+			return inlineCommandRejected(cmd, "set_alert", "invalid threshold")
+		}
+		if err := validateAlertBound(matcher, action, threshold); err != nil {
+			return inlineCommandRejected(cmd, "set_alert", err.Error())
+		}
+		if action == AlertDirectionAbove {
+			matcher.AlertAbove.set(threshold)
+		} else {
+			matcher.AlertBelow.set(threshold)
+		}
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_alert")
+		result.Result["matcher"] = matcher.matcherName()
+		result.Result["direction"] = action
+		result.Result["threshold"] = threshold
+		result.Result["flux_depth"] = fluxDepth
+		return result
+	case "clear":
+		if len(args) > 2 {
+			direction := strings.ToLower(args[2])
+			if direction != AlertDirectionAbove && direction != AlertDirectionBelow {
+				return inlineCommandRejected(cmd, "clear_alert", "unknown alert direction")
+			}
+			wasActive := clearMatcherAlertBound(matcher, direction)
+			result := inlineCommandResult(cmd, InlineCommandStatusApplied, "clear_alert")
+			result.Result["matcher"] = matcher.matcherName()
+			result.Result["direction"] = direction
+			result.Result["cleared"] = true
+			result.Result["was_active"] = wasActive
+			return result
+		}
+		aboveWasActive := matcher.AlertAbove.clear()
+		belowWasActive := matcher.AlertBelow.clear()
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "clear_alert")
+		result.Result["matcher"] = matcher.matcherName()
+		result.Result["cleared_above"] = true
+		result.Result["above_was_active"] = aboveWasActive
+		result.Result["cleared_below"] = true
+		result.Result["below_was_active"] = belowWasActive
+		return result
+	default:
+		return inlineCommandRejected(cmd, "alert", "unknown alert command")
+	}
+}
+
+func findMatcherByName(name string) *Matcher {
+	cleanName := strings.Trim(name, "*-+")
+	for _, mf := range PattyGraph.matchers {
+		matcher := mf.asMatcher()
+		if matcher != nil && matcher.matcherName() == cleanName {
+			return matcher
+		}
+	}
+	return nil
+}
+
+func validateAlertBound(matcher *Matcher, direction string, threshold int) error {
+	if threshold < 0 {
+		return fmt.Errorf("alert threshold cannot be negative")
+	}
+	if direction == AlertDirectionBelow && threshold == 0 {
+		return fmt.Errorf("below 0 is impossible for matcher counts")
+	}
+	switch direction {
+	case AlertDirectionAbove:
+		if matcher.AlertBelow.Enabled && matcher.AlertBelow.Threshold > threshold {
+			return fmt.Errorf("below threshold must be <= above threshold")
+		}
+	case AlertDirectionBelow:
+		if matcher.AlertAbove.Enabled && threshold > matcher.AlertAbove.Threshold {
+			return fmt.Errorf("below threshold must be <= above threshold")
+		}
+	default:
+		return fmt.Errorf("unknown alert direction")
+	}
+	return nil
+}
+
+func clearMatcherAlertBound(matcher *Matcher, direction string) bool {
+	if direction == AlertDirectionAbove {
+		return matcher.AlertAbove.clear()
+	}
+	return matcher.AlertBelow.clear()
+}
+
+func activeAlertStates() []map[string]interface{} {
+	active := []map[string]interface{}{}
+	for _, mf := range PattyGraph.matchers {
+		matcher := mf.asMatcher()
+		if matcher == nil {
+			continue
+		}
+		active = append(active, matcher.activeAlertStates()...)
+	}
+	return active
 }
 
 func setMatcherMode(name string, newMode int) {
@@ -1074,6 +1228,11 @@ func writeConfig(w io.Writer) {
 		if matcher != nil && matcher.displayMatchMode != 0 {
 			io.WriteString(w, fmt.Sprintf(InlinePreamble+" mode %s %d\n", matcher.name, matcher.displayMatchMode))
 		}
+		if matcher != nil {
+			for _, alertLine := range matcher.alertConfigLines() {
+				io.WriteString(w, alertLine+"\n")
+			}
+		}
 	} // Iterate through matchers and write their inline command representation
 	for _, m := range PattyGraph.matchers {
 		if m == nil {
@@ -1093,6 +1252,7 @@ func setFlux(f int) bool {
 	}
 	if fluxDepth != f {
 		fluxDepth = f
+		resetAllAlertRuntimeState()
 		return true
 	}
 	return false
@@ -1879,6 +2039,8 @@ func startUI() {
 							log.Printf("PattyLog jsonl write failed: %v", err)
 						}
 					}
+					PattyGraph.writePendingAlertTransitionsJSONL()
+					PattyGraph.clearPendingAlertTransitions()
 					resetCycle()
 				}
 			})

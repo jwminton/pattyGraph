@@ -13,8 +13,8 @@ import (
 func TestDefaultSidecarOptionsStayCompact(t *testing.T) {
 	opts := DefaultSidecarOptions()
 
-	if SidecarSchemaVersion != 2 {
-		t.Fatalf("SidecarSchemaVersion = %d, want 2", SidecarSchemaVersion)
+	if SidecarSchemaVersion != 3 {
+		t.Fatalf("SidecarSchemaVersion = %d, want 3", SidecarSchemaVersion)
 	}
 
 	if opts.TopLimit != defaultSidecarTopLimit {
@@ -217,5 +217,35 @@ func TestSidecarControlCommandIncludesControlFileMetadata(t *testing.T) {
 	}
 	if event.Result["action"] != "add_matcher" {
 		t.Fatalf("result action = %v, want add_matcher", event.Result["action"])
+	}
+}
+
+func TestSidecarAlertUsesTransitionFields(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	transition := AlertTransition{
+		Status:       AlertStatusTriggered,
+		MatcherName:  "errs",
+		Direction:    AlertDirectionAbove,
+		Value:        83,
+		Threshold:    50,
+		FluxDepth:    3,
+		Streak:       3,
+		Interval:     42,
+		CurrentCycle: 60,
+	}
+
+	event := PattyGraph.SidecarAlert(transition)
+
+	if event.EventType != SidecarEventAlert {
+		t.Fatalf("EventType = %q, want %q", event.EventType, SidecarEventAlert)
+	}
+	if event.Status != AlertStatusTriggered || event.Matcher != "errs" || event.Direction != AlertDirectionAbove {
+		t.Fatalf("alert identity = %#v", event)
+	}
+	if event.Value != 83 || event.Threshold != 50 || event.FluxDepth != 3 || event.Streak != 3 {
+		t.Fatalf("alert numeric fields = %#v", event)
+	}
+	if event.Interval != 42 || event.CurrentCycle != 60 {
+		t.Fatalf("alert timing fields = %#v", event)
 	}
 }

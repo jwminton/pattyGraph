@@ -271,6 +271,8 @@ func preloadRecentMinutes() error {
 					log.Printf("PattyLog preload jsonl write failed: %v", err)
 				}
 			}
+			PattyGraph.writePendingAlertTransitionsJSONL()
+			PattyGraph.clearPendingAlertTransitions()
 		} else {
 			stopTime := time.Now().Second()
 			// if seconds went from say 57...2 we need to do a push to catch up.
@@ -289,6 +291,8 @@ func preloadRecentMinutes() error {
 						log.Printf("PattyLog preload jsonl write failed: %v", err)
 					}
 				}
+				PattyGraph.writePendingAlertTransitionsJSONL()
+				PattyGraph.clearPendingAlertTransitions()
 			}
 		}
 	}
