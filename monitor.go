@@ -892,7 +892,7 @@ func invokeInlineCommand(line string) InlineCommandResult {
 		if err != nil || len(args) < 1 {
 			return inlineCommandRejected(cmd, "alert", "missing matcher name")
 		}
-		return invokeAlertCommand(cmd, args)
+		return invokeAlertCommand(cmd, args, line)
 	case "alerts", "ALERTS":
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "list_alerts")
 		result.Result["active_alerts"] = activeAlertStates()
@@ -972,7 +972,7 @@ func invokeInlineCommand(line string) InlineCommandResult {
 	return inlineCommandResult(cmd, InlineCommandStatusIgnored, "noop")
 }
 
-func invokeAlertCommand(cmd string, args []string) InlineCommandResult {
+func invokeAlertCommand(cmd string, args []string, line string) InlineCommandResult {
 	matcher := findMatcherByName(args[0])
 	if matcher == nil {
 		return inlineCommandRejected(cmd, "alert", "matcher not found")
@@ -999,9 +999,9 @@ func invokeAlertCommand(cmd string, args []string) InlineCommandResult {
 			return inlineCommandRejected(cmd, "set_alert", err.Error())
 		}
 		if action == AlertDirectionAbove {
-			matcher.AlertAbove.set(threshold)
+			matcher.AlertAbove.set(threshold, line)
 		} else {
-			matcher.AlertBelow.set(threshold)
+			matcher.AlertBelow.set(threshold, line)
 		}
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_alert")
 		result.Result["matcher"] = matcher.matcherName()

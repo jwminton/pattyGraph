@@ -76,6 +76,28 @@ func TestWriteConfigEmitsAlertLines(t *testing.T) {
 	}
 }
 
+func TestWriteConfigPreservesAlertCommentsAndReplacesBoundsIndependently(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add Googlebot")
+	invokeInlineCommand("!!! alert Googlebot below 1 # disappeared")
+	invokeInlineCommand("!!! alert Googlebot above 500 # too noisy")
+	invokeInlineCommand("!!! alert Googlebot above 700 # adjusted after replay")
+
+	var buf bytes.Buffer
+	writeConfig(&buf)
+	out := buf.String()
+
+	if !strings.Contains(out, "!!! alert Googlebot below 1 # disappeared\n") {
+		t.Fatalf("config did not preserve below alert comment:\n%s", out)
+	}
+	if strings.Contains(out, "!!! alert Googlebot above 500 # too noisy\n") {
+		t.Fatalf("config retained replaced above alert line:\n%s", out)
+	}
+	if !strings.Contains(out, "!!! alert Googlebot above 700 # adjusted after replay\n") {
+		t.Fatalf("config did not preserve replacement above alert comment:\n%s", out)
+	}
+}
+
 func TestWriteConfigQuotesAlertMatcherNamesWithSpaces(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	add := invokeInlineCommand(`!!! add "My Bot"`)
@@ -91,7 +113,7 @@ func TestWriteConfigQuotesAlertMatcherNamesWithSpaces(t *testing.T) {
 	writeConfig(&buf)
 	out := buf.String()
 
-	if !strings.Contains(out, "!!! alert 'My Bot' above 5\n") {
+	if !strings.Contains(out, `!!! alert "My Bot" above 5`+"\n") {
 		t.Fatalf("config did not quote spaced matcher alert:\n%s", out)
 	}
 

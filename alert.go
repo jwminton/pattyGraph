@@ -14,12 +14,13 @@ const (
 )
 
 type AlertBound struct {
-	Enabled   bool
-	Threshold int
-	Active    bool
-	HitRun    int
-	ClearRun  int
-	LastValue int
+	Enabled    bool
+	Threshold  int
+	Active     bool
+	HitRun     int
+	ClearRun   int
+	LastValue  int
+	ConfigLine string
 }
 
 type AlertTransition struct {
@@ -34,10 +35,11 @@ type AlertTransition struct {
 	CurrentCycle int
 }
 
-func (b *AlertBound) set(threshold int) {
+func (b *AlertBound) set(threshold int, configLine string) {
 	*b = AlertBound{
-		Enabled:   true,
-		Threshold: threshold,
+		Enabled:    true,
+		Threshold:  threshold,
+		ConfigLine: configLine,
 	}
 }
 
@@ -180,12 +182,19 @@ func (m *Matcher) alertConfigLines() []string {
 	lines := []string{}
 	matcherName := quoteInlineArg(m.matcherName())
 	if m.AlertBelow.Enabled {
-		lines = append(lines, InlinePreamble+" alert "+matcherName+" below "+strconv.Itoa(m.AlertBelow.Threshold))
+		lines = append(lines, m.AlertBelow.configLineOrFallback(matcherName, AlertDirectionBelow))
 	}
 	if m.AlertAbove.Enabled {
-		lines = append(lines, InlinePreamble+" alert "+matcherName+" above "+strconv.Itoa(m.AlertAbove.Threshold))
+		lines = append(lines, m.AlertAbove.configLineOrFallback(matcherName, AlertDirectionAbove))
 	}
 	return lines
+}
+
+func (b AlertBound) configLineOrFallback(matcherName string, direction string) string {
+	if b.ConfigLine != "" {
+		return b.ConfigLine
+	}
+	return InlinePreamble + " alert " + matcherName + " " + direction + " " + strconv.Itoa(b.Threshold)
 }
 
 func quoteInlineArg(arg string) string {
