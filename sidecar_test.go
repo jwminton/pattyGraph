@@ -14,8 +14,8 @@ import (
 func TestDefaultSidecarOptionsStayCompact(t *testing.T) {
 	opts := DefaultSidecarOptions()
 
-	if SidecarSchemaVersion != 3 {
-		t.Fatalf("SidecarSchemaVersion = %d, want 3", SidecarSchemaVersion)
+	if SidecarSchemaVersion != 4 {
+		t.Fatalf("SidecarSchemaVersion = %d, want 4", SidecarSchemaVersion)
 	}
 
 	if opts.TopLimit != defaultSidecarTopLimit {

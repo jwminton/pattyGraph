@@ -21,7 +21,7 @@ const (
 	SidecarEventInterval       = "interval"
 	SidecarEventControlCommand = "control_command"
 	SidecarEventAlert          = "alert"
-	SidecarSchemaVersion       = 3
+	SidecarSchemaVersion       = 4
 
 	SidecarMarkedStateMarked   = "marked"
 	SidecarMarkedStateUnmarked = "unmarked"
