@@ -98,16 +98,32 @@ At a glance, the scope and urgency of failures can be categorized. Looking left 
 - **Systemic error**: Service itself might be down or there is some fatal root error causing a system-wide issue
 
 
-## TimedReplay (demo/testing/forensics)
+## timedReplay
 
-TimedReplay is a small companion command under `cmd/timedReplay` that replays nginx access-log lines with controlled timing. It can be used to replay a historical window so PattyGraph can “watch the past” as if it were live. Typical use redirects timedReplay's stdout to a file that pattyGraph will then consume from another running session.
+`timedReplay` is a small companion utility that replays captured NGINX access
+logs with controlled timing, letting PattyGraph watch historical traffic as if
+it were arriving live.
+
+A typical replay session uses two shells. Start PattyGraph on an output log:
 
 ```bash
-go run ./cmd/timedReplay/main.go -file ./access.1.log -speed 10 > ./replayed_access.log
+touch replayed_access.log
+./pattyGraph replayed_access.log
 ```
+
+Then append replayed traffic from another shell:
+
 ```bash
-pattyGraph ./replayed_access.log
+go run ./cmd/timedReplay -file ./access.1.log >> ./replayed_access.log
 ```
+
+`timedReplay` groups lines by their NGINX timestamp second, preserving bursts
+from the original capture.
+
+For larger investigations, `cmd/timedReplay/log_split.sh` can split a capture
+into a seed file and replay file. See `cmd/timedReplay/README.md` for the full
+workflow.
+
 
 ## Inline Commands
 
