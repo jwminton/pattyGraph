@@ -36,7 +36,7 @@ import (
  *	matching but are acting on their specific semantics. Lines, counts lines, bytes counts bytes but what they contribute is
  *	that they know how to play the history/sparkline game.
  *
- * A rewrite would gather these into more explicit ways rather than the spread around the code is has now. isAddedAutobot() and
+ * A rewrite would gather these into more explicit ways rather than the spread around the code it has now. isAddedAutobot() and
  * name == "Bots" and the equivalents
  *
  * There's also "historical" matchers, these are the autobots above Bots and Bots. They all compete for sparline global
@@ -139,7 +139,7 @@ func (m *Matcher) postEndInterval() {
 
 var botsMigrated = 0
 
-// TODO: this is some of the oldest remaining code. Lots of it doesn't make sense any longer.
+// TODO: this is some of the oldest remaining code. Revisiting this will be more difficult than normal.
 func (m *Matcher) migrateBots(threshold float64) {
 	var topMatcher MatcherFacade
 	botsIndex = botsMatcherIndex()
@@ -777,7 +777,7 @@ func bytesEntrySort(entries []matchEntry) {
 	})
 }
 
-// TODO: This is horribly cobbled together :(
+// TODO: This is could probably be cobbled together better
 func linesEntrySort(entries []matchEntry) {
 	// Define fixed display order for known entries
 	order := map[string]int{
@@ -887,6 +887,7 @@ func sharedSystemDisplayFunc(displayColor, stressColor string) string {
 	return displayColor + "%-10.10s" + stressColor + "%4s%s" + displayColor + "%4s%1s%s[-:-]\n"
 }
 
+// Keeping these around as the browser detection aspect is probably worth the effort to bring forward in some way.
 const browserRegexString = `(?i)\b(Chrome|CriOS|Firefox|FxiOS|Safari|DuckDuckGo|Edg|Edge|OPR|MSIE|Trident|Brave|PlayStation|Vivaldi|Baidu|SeaMonkey|Maxthon|Puffin|Silk|Sogou|Dolfin|IceCat|Iceweasel|Waterfox|K-Meleon|PaleMoon|Avant|Epiphany)[/\s]?`
 const platformRegexString = `(?i)(Windows|Android|iPhone|Mac OS)`
 

@@ -144,8 +144,16 @@ func (g *FactoidGenerator) Add(f *Factoid, name ...string) {
 var doRandom bool
 
 func (g *FactoidGenerator) Next() (string, int, string) {
+	return g.next(true)
+}
 
-	if len(g.forced) > 0 {
+func (g *FactoidGenerator) NextBackground() (string, int, string) {
+	return g.next(false)
+}
+
+func (g *FactoidGenerator) next(includeForced bool) (string, int, string) {
+
+	if includeForced && len(g.forced) > 0 {
 		for _, f := range g.forced {
 			//if f.Condition(g.cycle, f.LastSeen, f.Shown) {
 			g.forced = g.forced[1:]

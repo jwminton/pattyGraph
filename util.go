@@ -62,6 +62,11 @@ const (
 	InlinePreamble = "!!!"
 )
 
+// A ridiculous amount of time went into this color selection order.
+// The intent is to support both a continuous supply of colors as well as
+// an "easy" way to have two different pattyGraphs look very visually distinct
+// in the event you need to run more than one. Having different "looks" makes
+// it easier to switch contexts for what pattyGraph is looking at
 var AutobotColors = []string{
 	// Reordered Colors
 	"[fuchsia]", "[yellow]", "[chartreuse]", "[tomato]",

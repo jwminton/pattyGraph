@@ -105,7 +105,7 @@ After that, all matches after bots get a chance at the match.
 
 This grew organically so it's all over the place. I'm still finding surprises.
 */
-// TODO Review this, its grown without consideration. There's only one monitor and there's been no disctinction between
+// TODO Review this, its grown without consideration. There's only one monitor and there's been no distinction between
 // what's global and what's in the monitor
 
 var mu sync.RWMutex             // Add RWMutex for synchronization

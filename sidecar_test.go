@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -247,5 +248,29 @@ func TestSidecarAlertUsesTransitionFields(t *testing.T) {
 	}
 	if event.Interval != 42 || event.CurrentCycle != 60 {
 		t.Fatalf("alert timing fields = %#v", event)
+	}
+}
+
+func TestBackgroundFactoidsDoNotConsumeStartupWelcome(t *testing.T) {
+	oldDoRandom := doRandom
+	doRandom = false
+	t.Cleanup(func() { doRandom = oldDoRandom })
+
+	g := NewFactoidGenerator()
+	if len(g.forced) == 0 {
+		t.Fatal("forced startup factoids = 0, want welcome queued")
+	}
+
+	background, _, _ := g.NextBackground()
+	if strings.TrimSpace(background) != "" {
+		t.Fatalf("background factoid = %q, want blank when random is disabled", background)
+	}
+	if len(g.forced) == 0 {
+		t.Fatal("NextBackground consumed forced startup factoid")
+	}
+
+	welcome, _, _ := g.Next()
+	if !strings.Contains(welcome, PattyGraphVersion) && !strings.Contains(welcome, "▁▂▃▄▅▆▇█") {
+		t.Fatalf("first normal factoid = %q, want welcome", welcome)
 	}
 }

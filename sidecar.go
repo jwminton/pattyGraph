@@ -706,7 +706,7 @@ func sidecarFactoids(limit int) []SidecarFactoid {
 	}
 	out := make([]SidecarFactoid, 0, limit)
 	for len(out) < limit {
-		text, probability, name := facts.Next()
+		text, probability, name := facts.NextBackground()
 		text = strings.TrimSpace(stripBrackets(text))
 		if text == "" {
 			break

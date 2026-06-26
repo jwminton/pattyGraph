@@ -7,183 +7,215 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 )
 
-// LogEntry represents a single log line with a timestamp
-type LogEntry struct {
-	timestamp time.Time
-	line      string
+const nginxTimeLayout = "02/Jan/2006:15:04:05 -0700"
+
+type replayConfig struct {
+	sourcePath string
+	outputPath string
+	speed      float64
+	sync0      bool
 }
 
-// parseLogLine parses a log line, extracting the timestamp and the full line content
-func parseLogLine(line string) (LogEntry, error) {
-	// Assuming the timestamp is at the beginning of each line in the format "YYYY-MM-DDTHH:MM:SS"
-	fields := strings.Fields(line)
-	if len(fields) < 1 {
-		return LogEntry{}, fmt.Errorf("invalid log line format")
-	}
-	timestampStr := fields[3]
-	timestamp, err := time.Parse("[02/Jan/2006:15:04:05", timestampStr)
-	//timestamp, err := time.Parse("2006-01-02T15:04:05", timestampStr)
-	if err != nil {
-		return LogEntry{}, err
-	}
-	return LogEntry{timestamp: timestamp, line: line}, nil
+type logGroup struct {
+	second time.Time
+	lines  []string
 }
 
-// replayLogStream reads, parses, and replays the log file in grouped intervals
-func replayLogStream(filename string, speedMultiplier float64) error {
-	file, err := os.Open(filename)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
+type progressTracker struct {
+	groupsWritten int
+	linesWritten  int
+	lastPrinted   time.Time
+}
 
-	var start, end *time.Time
-	var lastMinute = -1
-	scanner := bufio.NewScanner(file)
-	var intervalStart time.Time
-	var batch []LogEntry
+func main() {
+	conf := parseFlags()
+	if err := run(conf); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func parseFlags() replayConfig {
+	conf := replayConfig{}
+	flag.StringVar(&conf.sourcePath, "file", "./access.log", "Path to the source NGINX access log")
+	flag.StringVar(&conf.outputPath, "out", "-", "Output path to append replayed lines to, or '-' for stdout")
+	flag.Float64Var(&conf.speed, "speed", 1.0, "Replay speed multiplier, e.g. 2.0 replays two log seconds per real second")
+	flag.BoolVar(&conf.sync0, "sync0", false, "Wait before first output until wall-clock seconds match the first valid log line")
+	flag.Parse()
+	return conf
+}
+
+func run(conf replayConfig) error {
+	if conf.speed <= 0 {
+		return fmt.Errorf("speed must be greater than 0")
+	}
+
+	source, err := os.Open(conf.sourcePath)
+	if err != nil {
+		return fmt.Errorf("open source log %q: %w", conf.sourcePath, err)
+	}
+	defer source.Close()
+
+	out, closeOut, err := openOutput(conf.outputPath)
+	if err != nil {
+		return err
+	}
+	if closeOut != nil {
+		defer closeOut()
+	}
+
+	fmt.Fprintf(os.Stderr, "timedReplay: replaying %s -> %s at %.2fx\n", conf.sourcePath, conf.outputPath, conf.speed)
+	delay := time.Duration(float64(time.Second) / conf.speed)
+
+	return replay(source, out, delay, conf.sync0)
+}
+
+func openOutput(path string) (io.Writer, func() error, error) {
+	if path == "-" {
+		return os.Stdout, nil, nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open output log %q: %w", path, err)
+	}
+	return f, f.Close, nil
+}
+
+func replay(source io.Reader, out io.Writer, delay time.Duration, sync0 bool) error {
+	scanner := bufio.NewScanner(source)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+
+	writer := bufio.NewWriter(out)
+	defer writer.Flush()
+
+	var current logGroup
+	haveGroup := false
+	lineNumber := 0
+	progress := progressTracker{}
+	didStart := false
 
 	for scanner.Scan() {
+		lineNumber++
 		line := scanner.Text()
-		entry, err := parseLogLine(line)
+		logSecond, err := parseNginxLogTime(line)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Skipping line due to parsing error: %v\n", err)
+			warnDropLine(lineNumber, err)
 			continue
 		}
 
-		if start == nil || end == nil {
-			startDate := entry.timestamp.Format("2006-01-02")
-			startParsed, _ := time.Parse("2006-01-02 15:04:05", startDate+" "+*startTime)
-			start = &startParsed
-
-			endDate := entry.timestamp.Format("2006-01-02")
-			endParsed, _ := time.Parse("2006-01-02 15:04:05", endDate+" "+*endTime)
-			end = &endParsed
-		}
-
-		if entry.timestamp.Before(*start) || entry.timestamp.After(*end) {
+		if !haveGroup {
+			current = logGroup{second: logSecond, lines: []string{line}}
+			haveGroup = true
 			continue
 		}
 
-		// If the batch is empty, set the interval start to the current entry's timestamp
-		if len(batch) == 0 {
-			lastMinute = entry.timestamp.Minute()
-			intervalStart = entry.timestamp
+		if logSecond.Equal(current.second) {
+			current.lines = append(current.lines, line)
+			continue
 		}
 
-		// Determine the end of the current interval based on the speed multiplier
-		thisIntervalDuration := time.Duration(speedMultiplier) * time.Second
-		intervalEnd := intervalStart.Add(thisIntervalDuration)
-
-		// Check if the entry belongs in the current batch
-		if entry.timestamp.Before(intervalEnd) || entry.timestamp.Equal(intervalEnd) {
-			batch = append(batch, entry)
-		} else {
-			if entry.timestamp.Minute() != lastMinute {
-				fmt.Fprintf(os.Stderr, " %s Logtime: %s\n", time.Now().Format("15:04:05"), entry.timestamp)
-				lastMinute = entry.timestamp.Minute()
-			}
-			// Replay the current batch and reset for the next interval
-			replayBatch(batch)
-			batch = []LogEntry{entry} // Start new batch with the current entry
-			intervalStart = entry.timestamp
-
-			// Sleep to simulate the interval (e.g., 1 second real time)
-			// replay batch just slept for 3x150 so now sleep for 450
-			time.Sleep(450 * time.Millisecond)
+		maybeStartReplay(sync0, &didStart, current)
+		if err := writeGroup(writer, current); err != nil {
+			return err
 		}
-	}
+		progress.record(current)
+		time.Sleep(delay)
 
-	// Replay any remaining log lines in the last batch
-	if len(batch) > 0 {
-		replayBatch(batch)
+		current = logGroup{second: logSecond, lines: []string{line}}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading log file: %w", err)
+		return fmt.Errorf("read source log: %w", err)
 	}
 
+	if haveGroup {
+		maybeStartReplay(sync0, &didStart, current)
+		if err := writeGroup(writer, current); err != nil {
+			return err
+		}
+		progress.record(current)
+	}
+
+	fmt.Fprintf(os.Stderr, "timedReplay: complete groups=%d lines=%d\n", progress.groupsWritten, progress.linesWritten)
 	return nil
 }
 
-const numChunks = 3 // Divide the batch into thirds
-const fixedDelay = 150
-
-func replayBatch(batch []LogEntry) {
-	if len(batch) == 0 {
+func maybeStartReplay(sync0 bool, didStart *bool, firstGroup logGroup) {
+	if *didStart {
 		return
 	}
-
-	// Calculate chunk size and fixedDelay
-	chunkSize := (len(batch) + numChunks - 1) / numChunks // Round up
-
-	for i := 0; i < len(batch); i += chunkSize {
-		// Process a chunk of entries
-		end := i + chunkSize
-		if end > len(batch) {
-			end = len(batch)
-		}
-
-		for _, entry := range batch[i:end] {
-			fmt.Println(entry.line)
-		}
-
-		// Sleep after each chunk, except the last one
-		if end <= len(batch) {
-			time.Sleep(fixedDelay)
-		}
+	if sync0 {
+		waitForMatchingSecond(firstGroup.second.Second())
 	}
+	*didStart = true
+	fmt.Fprintf(os.Stderr, "timedReplay: started replaying at log second %s\n", firstGroup.second.Format(time.RFC3339))
 }
 
-// replayBatch outputs all lines in the given batch at once
-func replayBatchOld(batch []LogEntry) {
-	for _, entry := range batch {
-		fmt.Println(entry.line)
+func (p *progressTracker) record(group logGroup) {
+	p.groupsWritten++
+	p.linesWritten += len(group.lines)
+	if group.second.Second() != 0 {
+		return
 	}
+	if !p.lastPrinted.IsZero() && group.second.Sub(p.lastPrinted) < time.Minute {
+		return
+	}
+	p.lastPrinted = group.second
+	fmt.Fprintf(os.Stderr, "timedReplay: %s groups=%d lines=%d\n", group.second.Format(time.RFC3339), p.groupsWritten, p.linesWritten)
 }
 
-var startTime, endTime *string
-
-func main() {
-	filename := flag.String("file", "./access.log", "Path to the NGINX log file")
-	speedMultiplier := flag.Float64("speed", 1.0, "Speed multiplier for replaying logs (e.g., 2.0 for 2x)")
-
-	startTime = flag.String("start", "00:00:00", "Start time for replay (e.g., '08:00:00')")
-	endTime = flag.String("end", "23:59:59", "End time for replay (e.g., '09:30:00')")
-
-	// Custom help message
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [options]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Replays log entries from an NGINX standard access log file with configurable speed and time filtering.\n")
-		fmt.Fprintf(os.Stderr, "  NOTE: Time bounding only applies to the first day of the log.\n\n")
-		fmt.Fprintf(os.Stderr, "Options:\n")
-		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  %s -file ./access.log -speed 2 -start 08:00:00 -end 09:30:00\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  %s -file /var/log/nginx/access.log\n", os.Args[0])
+func waitForMatchingSecond(targetSecond int) {
+	if targetSecond < 0 || targetSecond > 59 {
+		return
 	}
-
-	flag.Parse()
-
-	// Check for extra arguments
-	if len(flag.Args()) > 0 {
-		fmt.Fprintf(os.Stderr, "Error: unexpected arguments: %v\n", flag.Args())
-		os.Exit(1)
+	now := time.Now()
+	waitSeconds := (targetSecond - now.Second() + 60) % 60
+	if waitSeconds == 0 {
+		fmt.Fprintf(os.Stderr, "timedReplay: sync0 matched wall second %02d\n", targetSecond)
+		return
 	}
+	fmt.Fprintf(os.Stderr, "timedReplay: sync0 waiting %ds for wall second %02d\n", waitSeconds, targetSecond)
+	time.Sleep(time.Duration(waitSeconds) * time.Second)
+}
 
-	if *filename == "" {
-		fmt.Fprintln(os.Stderr, "Error: Please provide a log file path using -file flag")
-		os.Exit(1)
+func parseNginxLogTime(line string) (time.Time, error) {
+	start := strings.IndexByte(line, '[')
+	if start == -1 {
+		return time.Time{}, fmt.Errorf("timestamp start not found")
 	}
+	endRel := strings.IndexByte(line[start+1:], ']')
+	if endRel == -1 {
+		return time.Time{}, fmt.Errorf("timestamp end not found")
+	}
+	raw := line[start+1 : start+1+endRel]
+	t, err := time.Parse(nginxTimeLayout, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse timestamp %q: %w", raw, err)
+	}
+	return t.Truncate(time.Second), nil
+}
 
-	fmt.Fprintf(os.Stderr, "Replaying log entries from %s at %.1fx speed...\n", *filename, *speedMultiplier)
-	if err := replayLogStream(*filename, *speedMultiplier); err != nil {
-		fmt.Fprintf(os.Stderr, "Error during replay: %v\n", err)
-		os.Exit(1)
+func writeGroup(writer *bufio.Writer, group logGroup) error {
+	for _, line := range group.lines {
+		if _, err := writer.WriteString(line); err != nil {
+			return fmt.Errorf("write replay line: %w", err)
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			return fmt.Errorf("write replay newline: %w", err)
+		}
 	}
+	if err := writer.Flush(); err != nil {
+		return fmt.Errorf("flush replay output: %w", err)
+	}
+	return nil
+}
+
+func warnDropLine(lineNumber int, err error) {
+	fmt.Fprintf(os.Stderr, "warn: dropping unparsable line %d: %v\n", lineNumber, err)
 }
