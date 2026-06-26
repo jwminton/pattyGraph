@@ -20,7 +20,7 @@ PattyGraph is a terminal-based, real-time access log analyzer for nginx-style lo
 
 It’s designed for live ops use (tmux/screen) and forensics (replaying historical log windows), with a dense interactive display that helps you see traffic **shape** and how it changes over time.
 
-![PattyGraph terminal UI](docs/images/pattyGraph-startup.png)
+![PattyGraph terminal UI](docs/images/pattyGraph-startup.gif)
 
 ## Download
 
