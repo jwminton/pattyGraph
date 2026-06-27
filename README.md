@@ -153,8 +153,6 @@ See:
 * Traffic texture model: `docs/traffic-texture.md`
 * UI interaction and layout: `docs/interactive-ui.md`
 * User-Agent residue buckets: `docs/user-agent-residue-profiling.md`
-* User-Agent distance tracking: `docs/user-agent-distance.md`
-* TimedReplay workflows: `docs/timed-replay.md`
 * Architecture notes: `docs/architecture.md`
 * Performance notes: `docs/performance-notes.md`
 
