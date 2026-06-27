@@ -16,7 +16,7 @@ flowchart LR
     Secondary --> IPs[ips column]
 ```
 
-`tabViewIndexKey` cycles through six modes with the status line shows a small glyph for the active mode:
+`tabViewIndexKey` cycles through six modes with the status line shows a small glyph for the active mode shown in 'expert mode':
 
 ```text
 0:-  1:/  2:|  3:\  4:=  5:_
