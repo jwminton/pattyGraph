@@ -146,6 +146,7 @@ See:
 ## Documentation
 (Planned and existing)
 
+* [PattyLog JSONL: Live Shape](./docs/JSONL_DIAGRAM.md)
 * Traffic texture model: `docs/traffic-texture.md`
 * UI interaction and layout: `docs/interactive-ui.md`
 * User-Agent residue buckets: `docs/user-agent-residue-profiling.md`
