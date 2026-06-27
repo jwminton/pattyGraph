@@ -149,6 +149,7 @@ See:
 * [PattyLog JSONL: Live Shape](./docs/JSONL_DIAGRAM.md)
 * [TUI Tab view cycle](./docs/TAB_VIEW_CYCLES.md)
 * [User-Agent Levenschtein Distance](./docs/LEVENSHTEIN_DISTANCE.md)
+* [Selection Deep Dive](./docs/SELECTION_DEEP_DIVE.md)
 * Traffic texture model: `docs/traffic-texture.md`
 * UI interaction and layout: `docs/interactive-ui.md`
 * User-Agent residue buckets: `docs/user-agent-residue-profiling.md`
