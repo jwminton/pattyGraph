@@ -92,6 +92,32 @@ This is why selecting a noisy ref like `product` can immediately show a first
 example, a current-interval example, and a latest example without doing a raw-log
 search.
 
+## TUI Source Line Under The Sparkgraph
+
+When an interesting key is selected in the TUI, PattyGraph adds a selected-key
+sparkline to the sparkgraph pane. The source log line printed below that
+sparkline is controlled by the active Tab view.
+
+The selected key itself does not change when Tab is pressed. Tab changes which
+stored source pointer is shown as the focused example:
+
+| Tab mode | Source line shown below selected sparkgraph |
+| --- | --- |
+| `0` ratio / burst | first source line for the key |
+| `1` flux | first source line for the key in the current interval |
+| `2` history depth | latest source line for the key |
+| `3` user-agent delta | latest source line for the key |
+| `4` mini sparkline | latest source line for the key |
+| `5` bytes | latest source line for the key |
+
+This means the selected sparkline stays anchored to the same `WordStats`, while
+the line underneath follows the same investigative lens as the current Tab mode:
+first seen, current-interval first seen, or latest seen.
+
+PattyLog is more explicit than the TUI here. It can expose
+`first_source`, `first_interval_source`, and `last_source` together in the same
+`selected` object instead of choosing only one line for display.
+
 ## What Selection Shows
 
 Interesting-item selection can target:
