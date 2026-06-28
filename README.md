@@ -147,6 +147,7 @@ See:
 ## Documentation
 (Planned and existing)
 
+* [Startup Speed aka:"Instant On"](./docs/STARTUP_SPEED.md)
 * [PattyLog JSONL: Live Shape](./docs/JSONL_DIAGRAM.md)
 * [TUI Tab view cycle](./docs/TAB_VIEW_CYCLES.md)
 * [User-Agent Levenschtein Distance](./docs/LEVENSHTEIN_DISTANCE.md)
