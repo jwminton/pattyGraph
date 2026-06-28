@@ -5,7 +5,7 @@ Stop dumping raw server logs into expensive LLMs. Let an AI agent read a compres
 ## Startup Speed (aka: 'Instant On')
 PattyGraph is designed to become useful almost immediately.
 
-On a typical development machine, PattyGraph can read and summarize about 80 MB of existing NGINX access log in roughly a second which is typically around 200K log lines. This is pattyGraph comsuming that data as though it was live at its fastest full processing speed minus the TUI updates. Once started, the TUI and PattyLog have the recent context to show traffic shape before live tailing takes over, as though pattytGraph had been running the whole time. A fully operational view starting from zero to ready in one second.
+On a typical development machine, PattyGraph can read and summarize about 80 MB of existing NGINX access log in roughly a second which is typically around 200K log lines. This is pattyGraph consuming that data as though it was live at its fastest full processing speed minus the TUI updates. This isn't a crippled startup mode. Once started, the TUI and PattyLog have the recent context to show traffic shape before live tailing takes over, as though pattytGraph had been running the whole time. A fully operational view starting from zero to ready in one second.
 
 ## New in PattyGraph
 
