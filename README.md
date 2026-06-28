@@ -2,6 +2,11 @@
 Stop dumping raw server logs into expensive LLMs. Let an AI agent read a compressed JSONL sidecar while you watch the live TUI dashboard
 ![PattyGraph terminal UI](docs/images/pattyGraph-startup.gif)
 
+## Startup Speed (aka: 'Instant On')
+PattyGraph is designed to become useful almost immediately.
+
+On a typical development machine, PattyGraph can read and summarize about 80 MB of existing NGINX access log in roughly a second which is typically around 200K log lines. This is pattyGraph comsuming that data as though it was live at its fastest full processing speed minus the TUI updates. Once started, the TUI and PattyLog have the recent context to show traffic shape before live tailing takes over, as though pattytGraph had been running the whole time. A fully operational view starting from zero to ready in one second.
+
 ## New in PattyGraph
 
 pattyGraph has expanded to express a more complete operational loop: observe, control, record, and alert.
