@@ -1,5 +1,5 @@
 # PattyGraph
-
+Stop dumping raw server logs into expensive LLMs. Let an AI agent read a compressed JSONL sidecar while you watch the live TUI dashboard
 ![PattyGraph terminal UI](docs/images/pattyGraph-startup.gif)
 
 ## New in PattyGraph
