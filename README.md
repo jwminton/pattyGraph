@@ -153,6 +153,7 @@ See:
 (Planned and existing)
 
 * [Startup Speed aka:"Instant On"](./docs/STARTUP_SPEED.md)
+* [The Lightweight Observer](./docs/LIGHTWEIGHT_OVSERVER.md)
 * [PattyLog JSONL: Live Shape](./docs/JSONL_DIAGRAM.md)
 * [TUI Tab view cycle](./docs/TAB_VIEW_CYCLES.md)
 * [User-Agent Levenschtein Distance](./docs/LEVENSHTEIN_DISTANCE.md)
@@ -161,7 +162,6 @@ See:
 * UI interaction and layout: `docs/interactive-ui.md`
 * User-Agent residue buckets: `docs/user-agent-residue-profiling.md`
 * Architecture notes: `docs/architecture.md`
-* Performance notes: `docs/performance-notes.md`
 
 ## Sample Data Policy
 
