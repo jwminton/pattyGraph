@@ -28,20 +28,6 @@ What has been happening recently, and what is happening now?
 PattyGraph answers that by preloading recent log data, grouping it into interval
 history, and then switching into live monitoring.
 
-```mermaid
-flowchart TD
-    Start[start PattyGraph]
-    Read[read recent MB]
-    Replay[replay recent minutes]
-    Push[build interval history]
-    Live[tail live log]
-
-    Start --> Read
-    Read --> Replay
-    Replay --> Push
-    Push --> Live
-```
-
 ## The `--read` Window
 
 The `-r` / `--read` option controls how many megabytes PattyGraph reads from the
