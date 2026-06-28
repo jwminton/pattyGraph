@@ -153,7 +153,7 @@ See:
 (Planned and existing)
 
 * [Startup Speed aka:"Instant On"](./docs/STARTUP_SPEED.md)
-* [The Lightweight Observer](./docs/LIGHTWEIGHT_OVSERVER.md)
+* [The Lightweight Observer](./docs/LIGHTWEIGHT_OBSERVER.md)
 * [PattyLog JSONL: Live Shape](./docs/JSONL_DIAGRAM.md)
 * [TUI Tab view cycle](./docs/TAB_VIEW_CYCLES.md)
 * [User-Agent Levenschtein Distance](./docs/LEVENSHTEIN_DISTANCE.md)
