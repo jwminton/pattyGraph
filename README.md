@@ -157,7 +157,7 @@ See:
 * [PattyLog JSONL: Live Shape](./docs/JSONL_DIAGRAM.md)
 * [TUI Tab view cycle](./docs/TAB_VIEW_CYCLES.md)
 * [Tokenized User-Agent Levenschtein Distance](./docs/LEVENSHTEIN_DISTANCE.md)
-* [TUI Mouse Interaction and Layout](./docs/CLICK_ZONES.md)
+* [TUI Mouse Interaction and Click Zones](./docs/CLICK_ZONES.md)
 * [Selection Deep Dive](./docs/SELECTION_DEEP_DIVE.md)
 * Traffic texture model: `docs/traffic-texture.md`
 * User-Agent residue buckets: `docs/user-agent-residue-profiling.md`
