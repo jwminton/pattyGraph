@@ -152,6 +152,7 @@ See:
 ## Documentation
 (Planned and existing)
 
+* [How To: Bots and Bot Army Detection](./docs/BOT_ARMY_DETECTION.md)
 * [Startup Speed aka:"Instant On"](./docs/STARTUP_SPEED.md)
 * [The Lightweight Observer](./docs/LIGHTWEIGHT_OBSERVER.md)
 * [PattyLog JSONL: Live Shape](./docs/JSONL_DIAGRAM.md)
