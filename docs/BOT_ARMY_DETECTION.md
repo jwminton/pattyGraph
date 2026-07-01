@@ -56,6 +56,91 @@ row still tracks other bot-like traffic that has not been split out.
 This is useful when a single bot is large enough to flatten the meaning of the
 aggregate view.
 
+## Pattern Matchers Remember IPs
+
+The `Bots` matcher is not sticky by design. It needs to stay broad and
+stateless enough to keep acting as the catch-all detector for bot-like traffic.
+Pattern-based matchers can be sticky by IP during the session.
+
+When a pattern matcher matches a line, it remembers that source IP inside that
+matcher. After that, later requests from the same IP can still be associated
+with that matcher even when the current line is not as cleanly labeled by the
+same User-Agent text.
+
+For example:
+
+```text
+1. An IP sends a request that says Googlebot.
+2. The Googlebot matcher sees it.
+3. PattyGraph remembers that IP in the Googlebot lane.
+4. Later traffic from that IP can still be shown as Googlebot-related shape.
+```
+
+This matters most for bot lanes above `Bots`. Those matchers compete for
+bot-centric traffic before the broad `Bots` row handles the line. Once an IP
+has said "hey, I'm Googlebot" and the `Googlebot` matcher sees it, PattyGraph
+can keep that IP attached to the Googlebot-related source shape instead of
+losing the relationship back into the catch-all bot aggregate.
+
+That is useful for bot-army detection because source behavior often matters as
+much as the current User-Agent string. A source that first identifies as a
+known bot and then keeps moving is still part of the live pattern an operator
+may want to inspect.
+
+This is association, not authentication. PattyGraph is not proving that the IP
+is truly Googlebot. It is preserving the live observation:
+
+```text
+this IP has already appeared in the promoted bot lane
+```
+
+## How Log Lines Are Considered
+
+Conceptually, PattyGraph treats the matcher list differently above and below
+`Bots`.
+
+Above `Bots`, each log line is in a first-claim competition. These promoted bot
+matchers get to look at the line before the broad `Bots` matcher. If one of
+those rows claims the line, that line belongs to that promoted lane for the
+bot-centric view.
+
+Claimed or associated lines get the matcher's assigned color and show up in
+JSONL with that matcher relationship.
+
+`Bots` is the catch-all boundary for bot-like traffic. It catches the bot-like
+lines that were not already claimed by a promoted matcher above it.
+
+"Promoted" matchers are really simple matchers that were auto-added by the
+general `Bots` matcher and are still located above `Bots`. Functionally, there
+is no difference between a `Bots`-added matcher and another simple matcher added
+by an inline command or a configuration line. Its behavior comes from where it
+sits in the matcher list.
+
+That placement is intentional user control. The matcher-add help documents the
+name prefixes that choose where a matcher lands: top of the list, just above
+`Bots`, or below `Bots` as a non-competing observer. See `--help inline` for
+the inline `!!! add` prefix rules, and the main help for the related keyboard
+shortcuts.
+
+Below `Bots`, the behavior is different. The remaining rows are not competing
+for exclusive ownership of the line. They are all allowed to inspect the same
+line and record their own signal if it applies.
+
+In screen terms:
+
+```text
+above Bots:  one bot-centric row gets the line
+Bots:        broad bot-like fallback
+below Bots:  many rows may observe the same line
+```
+
+That is why a single request can contribute to `lines`, `bytes`, `errs`, or an
+interesting-item view below `Bots`, while still having only one primary
+bot-centric lane above the `Bots` boundary.
+
+User-added matchers below `Bots` also get their own chance to register that the
+log line fits their criteria.
+
 ## Bot Armies
 
 In this context, “bot army” means automated traffic whose distributed sources
