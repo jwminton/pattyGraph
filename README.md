@@ -153,6 +153,7 @@ See:
 (Planned and existing)
 
 * [How To: Bots and Bot Army Detection](./docs/BOT_ARMY_DETECTION.md)
+* [From Match to Signal: Time Pressure in PattyGraph](./docs/TIME_PRESSURE.md)
 * [Startup Speed aka:"Instant On"](./docs/STARTUP_SPEED.md)
 * [The Lightweight Observer](./docs/LIGHTWEIGHT_OBSERVER.md)
 * [PattyLog JSONL: Live Shape](./docs/JSONL_DIAGRAM.md)
