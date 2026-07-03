@@ -23,114 +23,34 @@ import (
 	"github.com/rivo/tview"
 )
 
-// TODO: tighten this up or nuke it
-type MatcherFacade interface {
-	push()               // Pushes data to the matcher
-	match() bool         // Matches against currentLine
-	matcherName() string // Provides the matcher’s name
-	displayString() string
-	displayMatched() string // Generates a display string
-	setColor(color string)
-	minMaxHistory() (int, int)
-	getCount() int
-	asMatcher() *Matcher
-	asInlineCommand() string
-}
-
-// Every logLine is put into this in one place as efficiently as possible for everyone else's reuse
-// No line altering (e.g. toLower) or tokenization should be repeated.
-// Not enforced but the design intent is that once a field is set it acts as an immutable structure.
-// No consumer should be changing a set field.
-// Simple matchers with a color set will transfer the last (or first if configured) match color to this
-// Pass by reference only
-// Word matchers only keep first and last for the source lines
-type lineSource struct {
-	logLine        string
-	ip             string
-	ipPrefix       string
-	request        string
-	referer        string
-	bytesValue     int
-	userAgent      string
-	respCode       string
-	userAgentDelta float64 // The delta seen per already seen IP request
-	captureColor   string  // could probably replace with a data striping approach
-	captureMatcher string
-
-	//tokenBand AgentBand
-	tokenBandCount int
-
-	// caches only needed while matching... can be nuked post match()
-	userAgentTokens   []string
-	replacedUserAgent string
-	cloned            *lineSource
-}
-
-func (l lineSource) isError() bool {
-	if l.respCode == "" {
-		return false
-	}
-	if (l.respCode)[0] == '4' || (l.respCode)[0] == '5' {
-		return true
-	}
-	return false
-}
-
-// TODO Maybe move these back to being part of monitor and accessed as PattyGraph.currentCycle
-var currentCycle int  // the current cycle number counting UP to DefaultIntervalSize
-var logicalCycles int // Number of cycles real (or skipped by reading previous lines on startup)
-
-// Monitor
-/**
-There's really only ever one monitor and its set as the global PattyGraph. Global settings should try to go through that.
-
-Matchers are currently layered like this and their properties:
-<IP_autobots>    	Simple				historical
-<conf_file_bots> 	Simple				historical
-<autobots>			Simple				historical
-<Bots>				NOT Simple(Regex)	historical
-<lines>				Simple (Lines)		NOT historical
-<bytes> 			Simple (bytes) 		NOT historical
-<words>  	Not Simple (WordMatcher)	NOT historical
-<refs>  	Not Simple (WordMatcher)	NOT historical
-<ips>  		Not Simple (WordMatcher)	NOT historical
-
-Word matchers return "" unless they have a selection then their displayString() is used to show the spark info and
-logline at the bottom of the sparkgraph pane.
-
-IP_autobots are added by Ips when 10% of lines comes from 1 IP and they're added to the top of the list
-autobots are added by Bots when its threshold is crossed
-Matching starts at the top and proceeds to Bots first. If any of thost "match", none of the other see the match attempt.
-After that, all matches after bots get a chance at the match.
-
-This grew organically so it's all over the place. I'm still finding surprises.
-*/
-// TODO Review this, its grown without consideration. There's only one monitor and there's been no distinction between
-// what's global and what's in the monitor
-
-var mu sync.RWMutex             // Add RWMutex for synchronization
-var currentLine = &lineSource{} // line currently being processed (only valid from match cycle)
-var uaCardinalityMap = make(map[int]uint64, 20)
-var totalAgentTokenCount uint64
-
+// Monitor owns PattyGraph's live run state, display surfaces, matcher lanes,
+// selected rows, and interval counters. The process uses one global Monitor
+// instance, PattyGraph, so runtime settings and UI state flow through this
+// structure.
+//
+// Matcher order is meaningful. Rows above Bots compete for each log line first;
+// at most one of those rows claims the line. Bots then handles remaining bot-like
+// traffic, and rows below Bots observe every line for system counts and
+// interesting words, refs, and IPs. This ordering is also the visual lane order
+// used by the TUI and inline matcher insertion.
 type Monitor struct {
 	pattyConfig *MonitorConfig
 
-	filePath           string // file being  monitored
-	totalLines         uint64 // total number of lines seen since started
-	totalBytes         uint64 // total number of bytes totaled since started
-	intervalLines      int    // total number of lines seen during this DefaultIntervalSize
-	intervalsCompleted int    // total number of intervals completed
+	filePath           string // access log being monitored
+	totalLines         uint64 // lines seen since startup
+	totalBytes         uint64 // bytes seen since startup
+	intervalLines      int    // lines seen during the current interval
+	intervalsCompleted int    // completed intervals since startup
 
 	app                  *tview.Application
 	layout               *tview.Flex
-	sparklineHistoryView *tview.TextView // For matcher list and history view
-	botMatchesView       *tview.TextView // View for displayMatched() content of matchers
-	wordMatchesView      *tview.TextView // For interesting word results
-	refsView             *tview.TextView // For interesting urls results
-	ipsView              *tview.TextView // For interesting ips results
+	sparklineHistoryView *tview.TextView // matcher list, sparklines, and selected history
+	botMatchesView       *tview.TextView // selected matcher detail
+	wordMatchesView      *tview.TextView // interesting word results
+	refsView             *tview.TextView // interesting referrer results
+	ipsView              *tview.TextView // interesting IP results
 
-	// Tracking well known matchers, finally
+	// Core matcher lanes kept by name for fast access and UI coordination.
 	matchers     []MatcherFacade
 	botsMatcher  *Matcher
 	wordsMatcher *InterestingWordMatcher
@@ -140,7 +60,7 @@ type Monitor struct {
 	bytesMatcher *Matcher
 	errsMatcher  *Matcher
 
-	tabViewIndexKey    int // tab view index
+	tabViewIndexKey    int // secondary-view tab index
 	selectedGraphValue int
 	logtime            time.Time  // updated once a cycle from log input. Used for status display only.
 	logtimeCache       *time.Time // part of the trigger for log time cache update once a cycle
@@ -154,10 +74,83 @@ type Monitor struct {
 	overallMax, overallMin int
 	demo                   bool
 	showTicker             bool
-	// metrics
+	// Runtime metrics and alert transitions.
 	totalAgentTokens        uint64
 	unmarked                int
 	pendingAlertTransitions []AlertTransition
+}
+
+var mu sync.RWMutex             // Add RWMutex for synchronization
+var currentLine = &lineSource{} // line currently being processed (only valid from match cycle)
+var uaCardinalityMap = make(map[int]uint64, 20)
+var totalAgentTokenCount uint64
+
+// Cycle counters are package-level because parsing, matching, and display all
+// read the same log-time position during the hot path.
+var currentCycle int  // the current cycle number counting UP to DefaultIntervalSize
+var logicalCycles int // Number of cycles real (or skipped by reading previous lines on startup)
+
+// MatcherFacade is the shared lane interface for PattyGraph's ordered TUI rows.
+//
+// The visible row order contains two different kinds of objects:
+//   - Matcher rows, which can claim log lines and participate in bot competition.
+//   - Interesting streams, which observe every line after Bots and expose words,
+//     refs, and IPs.
+//
+// Keeping them in one ordered slice lets the UI, push cycle, config output, and
+// row insertion logic operate on the same visual lane model. Some methods only
+// have meaningful behavior for concrete Matcher rows, so callers that need
+// Matcher-specific state must use asMatcher() and handle nil for interesting
+// streams.
+type MatcherFacade interface {
+	push()               // Pushes data to the matcher
+	match() bool         // Matches against currentLine
+	matcherName() string // Provides the matcher’s name
+	displayString() string
+	displayMatched() string // Generates a display string
+	setColor(color string)
+	minMaxHistory() (int, int)
+	getCount() int
+	asMatcher() *Matcher
+	asInlineCommand() string
+}
+
+// lineSource is the parsed, shared view of the current log line. Parsing,
+// normalization, and tokenization happen once per line so matchers and
+// interesting streams can reuse the same fields without redoing hot-path work.
+//
+// Consumers should treat set fields as immutable during a match cycle. Simple
+// matchers may attach capture color/name metadata, and word matchers retain only
+// selected source examples instead of copying every line.
+type lineSource struct {
+	logLine        string
+	ip             string
+	ipPrefix       string
+	request        string
+	referer        string
+	bytesValue     int
+	userAgent      string
+	respCode       string
+	userAgentDelta float64 // The delta seen per already seen IP request
+	captureColor   string  // color assigned by the matcher that claimed this line
+	captureMatcher string
+
+	tokenBandCount int
+
+	// Matching-only derived fields; rebuilt for each parsed log line.
+	userAgentTokens   []string
+	replacedUserAgent string
+	cloned            *lineSource
+}
+
+func (l lineSource) isError() bool {
+	if l.respCode == "" {
+		return false
+	}
+	if (l.respCode)[0] == '4' || (l.respCode)[0] == '5' {
+		return true
+	}
+	return false
 }
 
 func NewMonitor(conf *MonitorConfig) *Monitor {
@@ -213,11 +206,9 @@ func (m *Monitor) minAvgMaxHistoryAcrossMatchers() (int, float64, int) {
 		return 0, 0, 0
 	}
 
-	// Slice to hold matchers with includeHistory == true
 	var filteredMatchers []MatcherFacade
-	//botsIndex = botsMatcherIndex()
-	// TODO This can benefit from a Historic marker interface for Matcher
-	// Collect only matchers where includeHistory is true
+	// Rows above Bots share historical graph scaling; system rows and
+	// interesting streams below Bots use their own local scales.
 	for i, matcher := range m.matchers {
 		if i < botsIndex {
 			filteredMatchers = append(filteredMatchers, matcher)
@@ -557,8 +548,7 @@ func match(line string) {
 			currentLine.userAgentDelta = levenshteinTokensRatio(prevStats.agentTokensFromSource, currentLine.userAgentTokens)
 		}
 	}
-	// TODO MatcherFacade might be more annoying than its worth
-	// grab autobot matcher color
+	// Only concrete matcher rows can tag remembered IPs before bot competition.
 	for i, matcher := range PattyGraph.matchers {
 		if i < botsIndex {
 			basicMatcher := matcher.asMatcher() // no interesting matchers should be here
@@ -1447,8 +1437,7 @@ func (b *BuilderComplex) Reset() {
 	b.matcherBuilder.Reset()
 }
 
-// builders used during display. Probably could be consolidated to a builder pool across more uses but it never shows
-// up in profiles now like this.
+// Builders reused during display to avoid repeated allocation in the refresh path.
 var PattyGraphBuilderComplex BuilderComplex
 
 func updateDisplay() {
@@ -1494,8 +1483,7 @@ func updateDisplay() {
 
 	}
 
-	// Pre-calculate global history-wide values used by matchers once here
-	// TODO: This could be moved to the push?
+	// Recompute global history-wide scale lazily after push invalidates it.
 	if PattyGraph.overallMax <= 0 {
 		// These values only change after a push(), so this tries to cache them between pushes
 		// push sets overallMax to -1 to signal a recomputation be done here
@@ -1571,30 +1559,25 @@ func (m *Monitor) pattyPushFactorIncr(increment int) bool {
 /*
 *
 
-		PattyGraph intentionally treats the terminal screen as a rendered coordinate
-		surface rather than a tree of tview widgets. The display panes are text views,
-		but the interaction model is visual: clicks are interpreted by X/Y position
-		against stable screen regions such as the matcher graph, matcher breakdowns,
-		words, refs, and IPs.
+	PattyGraph intentionally treats the terminal screen as a rendered coordinate
+	surface rather than a tree of tview widgets. The display panes are text views,
+	but the interaction model is visual: clicks are interpreted by X/Y position
+	against stable screen regions such as the matcher graph, matcher breakdowns,
+	words, refs, and IPs.
 
-		setUIHook is therefore the TUI controller. It maps keyboard and mouse gestures
-		onto PattyGraph’s live operational model: matcher selection, interesting-key
-		selection, graph value inspection, display-mode cycling, matcher promotion, and
-		runtime tuning.
+	setUIHook is therefore the TUI controller. It maps keyboard and mouse gestures
+	onto PattyGraph’s live operational model: matcher selection, interesting-key
+	selection, graph value inspection, display-mode cycling, matcher promotion, and
+	runtime tuning.
 
-		Basically:
-	    this is not accidental spaghetti
-	    it is a deliberate controller layer
-	    tview widgets are rendering surfaces, not the interaction model
-	    the UI behavior is spatial and section-based
-	    the function is large because the controller owns the full gesture vocabulary
+	This function is the spatial controller for the TUI: tview widgets provide
+	rendering surfaces, while PattyGraph owns the section-based gesture vocabulary.
 */
 func setUIHook() {
 	PattyGraph.app.SetMouseCapture(func(event *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
-		// Set up event handling
 		mLen := len(PattyGraph.matchers)
-		// TODO Probably all of this needs to be made more sensible. Let listy-things declare their extents, simulate
-		// hit detection, etc. Right now, hardcode it. The UI layout is stable.
+		// Hit detection is tied to the stable text layout rendered above: matcher
+		// rows first, then optional ticker/selection rows, then interesting lists.
 		if action == tview.MouseLeftClick {
 			sHeight := PattyGraph.sparkPanelHeight()
 			hasControlKey := event.Modifiers()&tcell.ModCtrl != 0
@@ -1605,8 +1588,8 @@ func setUIHook() {
 			if x > PattyPrintWidth || y < (2-offset) {
 				return event, action
 			}
-			// Autobot Matchers & Sparkline
-			// TODO this just happens to work bc there's 3 word matchers + 1 Selection spot in the display list
+			// Matcher rows occupy the spark panel before the fixed interesting
+			// streams and selected-interesting row.
 			if y < sHeight {
 				index := y - 2
 				matcherCount := mLen - 3
@@ -1636,8 +1619,7 @@ func setUIHook() {
 					togglePreamble()
 				}
 
-				//// sparkgraph value selection
-				//// TODO: This should probably be using index
+				//// selected interesting sparkline value selection
 				if y == mLen-1 && PattyGraph.selectedInterestingMatcher != nil {
 					//m.setSelectedMatcher(nil)
 					if x >= 20 && x < PattyPrintWidth {
@@ -1945,9 +1927,8 @@ func setUIHook() {
 						newM.intervalCount = entry.count
 						newM.history = entry.historySlice() // matcher creation
 					} else if PattyGraph.selectedInterestingMatcher == PattyGraph.ipsMatcher && PattyGraph.ipsMatcher.ipScratch != nil {
-						// This is when an item printed from displayIpGroups was selected.
-						// There's probably a faux stats somewhere with this data I could have grabbed
-						// but this pathway should always work too and is the originating source
+						// Prefix-group selections come from displayIpGroups; use the
+						// scratch aggregate as the source for the promoted matcher.
 						if newHistory, exists2 := PattyGraph.ipsMatcher.ipScratch.prefixHistorAggregateBufs[newPattern]; exists2 {
 							newM.intervalCount = PattyGraph.ipsMatcher.ipScratch.prefixCounts[newPattern]
 							newM.history = newHistory.Slice()

@@ -23,7 +23,9 @@ const (
 	PattyGraphName      = "PattyGraph"
 	// NOTE: PattyGraphVersion is used by compile.sh for repackaging labeling
 	PattyGraphVersion = "0.1.4"
+)
 
+const (
 	PattyOrange             = "#FFA96F"
 	PattyBotsColor          = "[#A0FFFF]"
 	PattyDisabledBotsColor  = "[#507070]"
@@ -34,7 +36,9 @@ const (
 	PattySecondaryHighlight = "#202020"
 	PattyErrorSelection     = "#804060"
 	PattyErrorHighlight     = "#A07090"
+)
 
+const (
 	PattyPrintWidth         = 100
 	progressBarWidth        = 15
 	DefaultHistoryDepth     = 80
@@ -52,21 +56,19 @@ const (
 	DefaultFluxDepth        = 3
 
 	SecondaryInfoTabDepth = 6
+)
 
+const (
 	upArrow    = "↑"
 	levelArrow = ":"
 	downArrow  = "↓"
 
 	botsDisplayWidth = 26
-	//TODO: allow "!!!" to be some other 3 char sequence such as "+++"
-	InlinePreamble = "!!!"
+	InlinePreamble   = "!!!"
 )
 
-// A ridiculous amount of time went into this color selection order.
-// The intent is to support both a continuous supply of colors as well as
-// an "easy" way to have two different pattyGraphs look very visually distinct
-// in the event you need to run more than one. Having different "looks" makes
-// it easier to switch contexts for what pattyGraph is looking at
+// AutobotColors is ordered to provide a long sequence of visibly distinct row
+// colors, especially when more than one PattyGraph session is open.
 var AutobotColors = []string{
 	// Reordered Colors
 	"[fuchsia]", "[yellow]", "[chartreuse]", "[tomato]",
@@ -88,17 +90,10 @@ var AutobotColors = []string{
 	"[lightsalmon]", "[mediumorchid]", "[rebeccapurple]", "[darkolivegreen]",
 }
 
-/*
-*
-I've tried a lot of different approaches, a manual hybrid seems to be the best visually
-The first 3 values are a linear map to history depth == 1,2,3.
-The rest are scaled to compresses upper values.
-
-Interesting words tend to be all or nothing and don't spend much time in the middle.
-They're either just added or have always been around. I think the benefit is catching
-one on the way from one end to the other.
-*/
-// some code depends on monoColors being at least 4 elements long
+// monoColors maps shallow interesting-entry history depth to grayscale display
+// colors. Early depths get distinct steps, while later depths compress toward
+// white because entries usually become either short-lived or established quickly.
+// Some code depends on monoColors being at least 4 elements long.
 var monoColors = []string{
 	"#363636", //  16% brightness
 	"#494949", //  24% brightness
@@ -118,17 +113,11 @@ var displayMod = 1
 var peakIpThreshold = 10
 var firstColorWins bool
 
-// TODO allow someone to override this
-// TODO need a "print this out and exit" mode
-// Define a slice with common words
-// Overkill, but in an emergency or forensic investigation I wouldn't care about any of
-// these words showing up in scans nor would they really point to anything interesting
-// in and of themselves
-// PURELY for InterestingWordMatcher filtering.
-// leaving the commented out words that used to be here for future reference. In the future if you're
-// adding to this list, these are the things that were already in it and taken back out.
-// Keep failed experiments here too. This list is semi-tuned by now. Adding or deleting is a
-// big deal
+// commonWordList filters stable, high-frequency tokens from InterestingWordMatcher
+// streams. These words are useful context inside raw logs, but rarely deserve
+// top-list attention during an emergency or forensic pass. Commented entries
+// document prior tuning decisions so future changes can see what was tested and
+// removed.
 var commonWordList = []string{
 	"GET", "POST", "PUT", "HEAD", "OPTIONS", "DELETE", "CONNECT", "TRACE", "PATCH", // HTTP methods
 	"+http", "http", "+https", "https", "HTTP", "HTTP/1.1", "HTTP/2.0", "HTTPS", // Protocols

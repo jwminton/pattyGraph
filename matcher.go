@@ -12,46 +12,25 @@ import (
 	"strings"
 )
 
-/*
- * Matcher
- *
- * The whole point of pattyGraph is to hold an ordered set of matcher and wordMatchers while the main loop
- * drops individual log lines through. All significant work within pattyGraph is going to be done by a matcher
- * or a time based wordMatcher. These are the matchers. Everything in the graph and down the left hand side
- * of the display are all matchers.
- *
- * There's three types of these matchers now in use: Simple, Bots/Regex, lines/bytes
- *
- *	Simple - These are the auto-inserted autobot detectors like Googlebot, bingbot, etc. They search for
- *	their string in user-agent and they capture the ip's that matched and how many times. These are the name:text_pattern
- *	entries read from file
- *
- *	Regex - Bots is the only live version. This was the original matcher that matches based on a regex, capture
- *	what bot matched. Further, Bots will spawn the top matcher if it itself is the top matcher at the end of an interval.
- *	There's no reason more matchers could be made like this (restricted url matcher?) but Bots is the one. The browser
- *	identification matcher 'Brows' was exactly like Bots, just not "anointed" as being special enough to spawn autobots.
- *	Bots' special treatment could be applied more widely if the situation needed it.
- *
- *	lines/bytes - These don't have patterns, are technically called Simple (i.e. not regex) Use hint text and don't do any
- *	matching but are acting on their specific semantics. Lines, counts lines, bytes counts bytes but what they contribute is
- *	that they know how to play the history/sparkline game.
- *
- * A rewrite would gather these into more explicit ways rather than the spread around the code it has now. isAddedAutobot() and
- * name == "Bots" and the equivalents
- *
- * There's also "historical" matchers, these are the autobots above Bots and Bots. They all compete for sparline global
- * graph scaling. lines/bytes and things like brows (after Bots in the list) do not
- *
- * See Monitor for matcher layering
- */
-
+// Matcher owns row-level counting, capture, history, alerting, and display for
+// concrete matcher lanes in PattyGraph.
+//
+// Simple matchers search one or more fields for configured text and track
+// matching IPs/prefixes. Promoted bot matchers and user-added matchers use this
+// path. Bots is the special classifier row that can identify bot-family traffic
+// and promote high-volume bot labels into their own rows. Lines, bytes, and errs
+// use the same history/display machinery while applying system-row semantics
+// instead of ordinary text matching.
+//
+// Historical matchers, primarily rows above Bots plus Bots itself, share global
+// sparkline scaling so the left-side graph can compare bot pressure across rows.
+// System and interesting rows below Bots generally scale themselves locally.
 type Matcher struct {
 	name    string
 	history []int // To store the history of counts
 	color   string
-	// todo: invert this logic later when other changes are known to be stable
-	// Bots, lines, bytes, errs -- meant to also distinguish regex and non-regex but now there's no real regex
-	// all non-system matchers are 'true' while Bots, lines, bytes, errs are 'false'
+	// User-added and promoted simple matchers use autobot display/tagging
+	// behavior; built-in rows such as Bots, lines, bytes, and errs do not.
 	isAddedAutobot    bool
 	useRegexMatchKeys bool
 	predicateFuncs    []func() (bool, [][]string)
@@ -106,6 +85,14 @@ func NewPredicateMatcher(name string) *Matcher {
 func (m *Matcher) asMatcher() *Matcher {
 	return m
 }
+
+// markAsAddedMatcher identifies user-added and promoted simple matchers for
+// display and remembered-IP tagging behavior. Built-in system rows such as
+// Bots, lines, bytes, and errs leave this false.
+func (m *Matcher) markAsAddedMatcher() {
+	m.isAddedAutobot = true
+}
+
 func (m *Matcher) getCount() int { return m.intervalCount }
 
 func (m *Matcher) changeRate() float64 {
@@ -139,7 +126,7 @@ func (m *Matcher) postEndInterval() {
 
 var botsMigrated = 0
 
-// TODO: this is some of the oldest remaining code. Revisiting this will be more difficult than normal.
+// Bot migration depends on matcher ordering and interval count transfer; keep changes focused and covered by tests.
 func (m *Matcher) migrateBots(threshold float64) {
 	var topMatcher MatcherFacade
 	botsIndex = botsMatcherIndex()
@@ -217,8 +204,7 @@ func SimplePredicateMatcher(name string, patternTexts []string) *Matcher {
 			return strings.Contains(currentLine.logLine, p), nil
 		})
 	}
-	// todo: I think this is both wrong and ignored
-	m.isAddedAutobot = true
+	m.markAsAddedMatcher()
 	return m
 }
 func RefsMatcher(name string, patternTexts []string) *Matcher {
@@ -230,8 +216,7 @@ func RefsMatcher(name string, patternTexts []string) *Matcher {
 			return strings.Contains(currentLine.referer, w), nil
 		})
 	}
-	// todo: I think this is both wrong and ignored
-	m.isAddedAutobot = true
+	m.markAsAddedMatcher()
 	return m
 }
 func CodeMatcher(name string, patternTexts []string) *Matcher {
@@ -243,8 +228,7 @@ func CodeMatcher(name string, patternTexts []string) *Matcher {
 			return strings.Contains(currentLine.respCode, w), nil
 		})
 	}
-	// todo: I think this is both wrong and ignored
-	m.isAddedAutobot = true
+	m.markAsAddedMatcher()
 	return m
 }
 func WordsMatcher(name string, patternTexts []string) *Matcher {
@@ -256,8 +240,7 @@ func WordsMatcher(name string, patternTexts []string) *Matcher {
 			return strings.Contains(currentLine.userAgent, w) || strings.Contains(currentLine.request, w), nil
 		})
 	}
-	// todo: I think this is both wrong and ignored
-	m.isAddedAutobot = true
+	m.markAsAddedMatcher()
 	return m
 }
 func IpsMatcher(name string, patternTexts []string) *Matcher {
@@ -317,11 +300,8 @@ func (m *Matcher) asInlineCommand() string {
 	return m.inlineCommandAction()
 }
 
-// push appends the current intervalCount to history, resets intervalCount, and maintains a max history length of DefaultHistoryDepth
+// push appends the current intervalCount to history, resets intervalCount, and maintains a max history length of DefaultHistoryDepth.
 func (m *Matcher) push() {
-	// TODO: I want to reverse this appending direction someday
-	//       Reversing has graphing and WordStats implications
-	//       WordStats did it right and reverses itself when graphing
 	m.evaluateAlertBounds()
 
 	// Append the current intervalCount to history
@@ -529,8 +509,8 @@ func (m *Matcher) generateSparkline(bottom int, top int) string {
 	return sparklineFromArray(scaledBottom, maxVal, history)
 }
 
-// So much is historical and cobbled together. Printing/formatting really needs to be brought together better
-// displayString generates a display string for the matcher showing the current intervalCount and sparkline
+// displayString generates the matcher row, including current count, sparkline,
+// selected detail mode, and optional grouped match breakdowns.
 func (m *Matcher) displayString() string {
 	//globalBottom, globalTop := PattyGraph.overallMin, PattyGraph.overallMax
 	// Convert the current intervalCount to a string
@@ -683,7 +663,7 @@ func (m *Matcher) displayMatched() string {
 			}
 			return sortedGroups[i].count > sortedGroups[j].count
 		})
-		// TODO 10 should be configurable
+		// Require enough members before showing a prefix group in the matcher detail.
 		const matcherGroupingFactor = 10
 		// Print the sorted results
 		for _, group := range sortedGroups {
@@ -694,10 +674,7 @@ func (m *Matcher) displayMatched() string {
 			}
 		}
 	} else {
-		// TODO: make this be a func call instead of an else branch that other future matchers could use as well
-		// Multi-match display for Bots & errs only
-		// isAddedAutobot is always false
-		// "Bots" & "errs" and maybe future custom matchers
+		// Multi-match display for system-style rows such as Bots and errs.
 		linesFudgeFactor := 0
 		if m == PattyGraph.linesMatcher || m == PattyGraph.bytesMatcher {
 			linesFudgeFactor = 1
@@ -780,7 +757,7 @@ func bytesEntrySort(entries []matchEntry) {
 	})
 }
 
-// TODO: This is could probably be cobbled together better
+// linesEntrySort keeps the lines matcher display in a stable diagnostic order.
 func linesEntrySort(entries []matchEntry) {
 	// Define fixed display order for known entries
 	order := map[string]int{
@@ -890,7 +867,7 @@ func sharedSystemDisplayFunc(displayColor, stressColor string) string {
 	return displayColor + "%-10.10s" + stressColor + "%4s%s" + displayColor + "%4s%1s%s[-:-]\n"
 }
 
-// Keeping these around as the browser detection aspect is probably worth the effort to bring forward in some way.
+// Browser/platform patterns are retained for matcher experiments and future browser-family grouping.
 const browserRegexString = `(?i)\b(Chrome|CriOS|Firefox|FxiOS|Safari|DuckDuckGo|Edg|Edge|OPR|MSIE|Trident|Brave|PlayStation|Vivaldi|Baidu|SeaMonkey|Maxthon|Puffin|Silk|Sogou|Dolfin|IceCat|Iceweasel|Waterfox|K-Meleon|PaleMoon|Avant|Epiphany)[/\s]?`
 const platformRegexString = `(?i)(Windows|Android|iPhone|Mac OS)`
 

@@ -20,7 +20,6 @@ import (
 //
 // Expect this file to be more active and less settled than the core ingestion,
 // matcher, and display paths.
-// THIS IS THE BLEEDING EDGE!!!
 
 // The factoid system is where new live-traffic observations are being prototyped as well as
 // expected and established factoids.

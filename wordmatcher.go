@@ -14,38 +14,13 @@ import (
 	"sync"
 )
 
-// Convert the slice to a map for quick lookups
-func makeCommonWordMap(words []string) map[string]bool {
-	cWords := make(map[string]bool, len(words))
-	for _, word := range words {
-		cWords[word] = true
-	}
-	return cWords
-}
-
-// These were in but then removed. Don't add them back in.
-// "+", " ",
-// "-", " ",
-var symbolReplacer = strings.NewReplacer(
-	"(", " ",
-	")", " ",
-	",", " ",
-	"[", " ",
-	"]", " ",
-	":", " ",
-	";", " ",
-	"/", " ",
-	"\\", " ",
-	"?", "  ",
-	"&", " ",
-)
-
-var commonWords map[string]bool // To filter out known uninteresting words todo should be global
-
+// InterestingWordMatcher tracks high-signal words, refs, and IPs under log-time
+// pressure. Each stream observes the lines it receives, retains compact history
+// for keys that keep proving relevant, and exposes selectable rows for the TUI.
 type InterestingWordMatcher struct {
 	mName             string
 	timeToLive        int
-	pushIntervalCount int             // TODO: is this needed?
+	pushIntervalCount int             // Completed pushes represented by this stream, capped at history depth when displayed.
 	peakWords         []string        // Ordered list of words that made it above threshold
 	peakWordsSet      map[string]bool // Helper map to ensure unique entries in peakWords
 	wordFrequency     map[string]*WordStats
@@ -73,23 +48,20 @@ type InterestingWordMatcher struct {
 	groupTracker *TopPrefixTracker
 	lruTracker   *ScoredLRUTracker
 
-	// for metrics
+	// Lightweight counters used by factoids and display diagnostics.
 	peakWordCounts   []int // rolling list of peak word counts
 	totalPeakCounts  int   // sum of all counts in `peakWordCounts`
 	wordStatsCreated int
-	//wordStatsRepopulated int
-	//wordStatsRepopMetric *ringBuffer
 }
 
-//var ipsWordStatsRepopBuf = &ringBuffer{}
-//var ipsWordStatsRepopBuf = &ringBuffer{}
+var commonWords map[string]bool // Filters known high-frequency tokens from interesting word streams.
 
-// NewInterestingWordMatcher initializes a new matcher with desired parameters
+// NewInterestingWordMatcher initializes a stream with its parser, retention
+// window, ranking trackers, and display scratch space.
 func NewInterestingWordMatcher(matcherName string, slidingWindowDuration int) *InterestingWordMatcher {
 	if commonWords == nil {
 		commonWords = makeCommonWordMap(commonWordList)
 	}
-	// Only Constructor
 	m := InterestingWordMatcher{
 		mName:         matcherName,
 		wordFrequency: make(map[string]*WordStats, 4096),
@@ -107,7 +79,33 @@ func NewInterestingWordMatcher(matcherName string, slidingWindowDuration int) *I
 	return &m
 }
 
-// TODO Revisit and try to remove these unhelpful MatcherFacade entries
+// Convert the slice to a map for quick lookups.
+func makeCommonWordMap(words []string) map[string]bool {
+	cWords := make(map[string]bool, len(words))
+	for _, word := range words {
+		cWords[word] = true
+	}
+	return cWords
+}
+
+// User-Agent and request tokenization intentionally keeps "+" and "-" intact;
+// both have proven useful when comparing generated and organic traffic.
+var symbolReplacer = strings.NewReplacer(
+	"(", " ",
+	")", " ",
+	",", " ",
+	"[", " ",
+	"]", " ",
+	":", " ",
+	";", " ",
+	"/", " ",
+	"\\", " ",
+	"?", "  ",
+	"&", " ",
+)
+
+// Interesting streams share the MatcherFacade lane model with concrete matchers
+// so the TUI can keep one ordered list for rendering, selection, and row math.
 func (m *InterestingWordMatcher) matcherName() string {
 	return m.mName
 }
@@ -260,21 +258,6 @@ func prettyPrintLogLine(line, selectedKey, lineColor string) string {
 	return sparkBuilder.String()
 }
 
-// There used to be two different but core ways of tracking history, each grew the
-// opposite of the other but each was handy at the time for different reasons.
-//
-//	This is one place it mattered. No longer needed. Leaving this as evidence of what
-//  NOT to do. If you're in a position of needing a reversedCopy, something is going wrong
-//
-//func reversedCopy(arr []int) []int {
-//	n := len(arr)
-//	result := make([]int, n)
-//	for i, v := range arr {
-//		result[n-1-i] = v
-//	}
-//	return result
-//}
-
 func ipsParseLine() string {
 	return currentLine.ip
 }
@@ -360,17 +343,14 @@ func (m *InterestingWordMatcher) match() bool {
 	// lc 21 ttl 5 lastSeen 15 = purge(new creation)
 	//matcherDurationInt := m.timeToLive
 	limit := logicalCycles - m.timeToLive
-	// TODO: should probably be encapsulated in a WordStats func
+	// Expiry is evaluated here because the TTL is matcher-specific log time.
 	for _, word := range words {
 		stats, exists := m.wordFrequency[word]
 		// if new or should be timed out
 		if !exists || stats.lastSeenTic < limit {
 			if exists {
-				// This happens, but at an exceedingly low amount, so just drop stats and get a new one.
+				// Recycle expired stats and start a fresh entry for this token.
 				recycleWordStats(stats)
-				//// TODO: take this out. its exceedingly rare. <100 for >1Mil
-				//repopulateWordStats(stats)
-				//m.wordStatsRepopulated++
 			}
 			m.wordFrequency[word] = newWordStats()
 			m.wordStatsCreated++
@@ -461,9 +441,8 @@ func (w *WordStats) captureColor() string {
 		keyColor = w.source.captureColor
 	}
 	if keyColor != "" {
-		// unwrap the brackets to put them on later
-		// todo use a consistent color representation with or without brackets
-		//      but not both
+		// Stored capture colors include tview brackets; display helpers reapply
+		// formatting around the unwrapped color token.
 		return keyColor[1 : len(keyColor)-1]
 	}
 	return ""
@@ -622,13 +601,11 @@ func (m *InterestingWordMatcher) push() {
 			}
 		}
 	}
-	//m.wordStatsRepopMetric.Push(m.wordStatsRepopulated)
 	m.updatePeakWordStats()
 	m.wordStatsCreated = 0
-	//m.wordStatsRepopulated = 0
 }
 
-// calls to this need to be cached. Great to call once per display :), terrible once per entry :(
+// Cache callers should compute this once per display cycle, not once per entry.
 func (m *InterestingWordMatcher) normalizedDenominator() float64 {
 	if PattyGraph.intervalsCompleted == 0 {
 		return PattyGraph.linesMatcher.previousAverage() / 10.0
@@ -738,12 +715,9 @@ func (s *ipGroupScratch) Clear() {
 	Optimizations that avoid this per-display summation have been rife with inaccuracies from
 	various sources of logical failures.
 */
-// This is where processing starts to show up in profiles :(
-// This also breaks inadequate locking models... ask me how I know :(
-// Even after refactoring and sharing print routines, this is still
-// long and terrible because its performing a magic trick of aggregating
-// group info across ips. Using the topN/heap approach and narrowing to 10
-// makes it doable
+// This path is intentionally explicit because it aggregates prefix state across
+// active IPs during display. The topN/heap approach keeps the per-display work
+// bounded enough for the TUI.
 func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
 	defer m.groupTracker.Reset()
 
@@ -761,8 +735,7 @@ func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
 		return sortedGroups[i].countPlusFirst > sortedGroups[j].countPlusFirst
 	})
 
-	// Chop and only use the top 10 entries
-	// TODO: what if peak > 10? Let 10 be configurable?
+	// Keep the displayed prefix group list compact enough for the TUI pane.
 	if len(sortedGroups) > 12 {
 		sortedGroups = sortedGroups[:12]
 		if selectedGroup != nil {
@@ -853,9 +826,8 @@ func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
 	if iCount > DefaultHistoryDepth {
 		iCount = DefaultHistoryDepth
 	}
-	// the printing below could be better but this is clear and works
-	// print prefix's first
-	// TODO: make this use writeMatchedEntry
+	// Render prefix groups before individual IPs so shared subnet behavior is
+	// visible without expanding every member.
 	for _, group := range sortedGroups {
 		if prefixGroups[group.prefix] < peakIpThreshold {
 			continue
@@ -883,7 +855,7 @@ func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
 		}
 
 		groupString := fmt.Sprintf("%s*.*(%d)", group.prefix, prefixGroups[group.prefix])
-		// TODO: is this leaking instances?
+		// Temporary display-only stats let prefix groups reuse matched-entry formatting.
 		fakeStat := &WordStats{
 			historyBuf: &ringBuffer{},
 			//historyBuf: scratch.prefixHistorAggregateBufs[group.prefix].ringClone(),
@@ -1032,10 +1004,7 @@ func (m *InterestingWordMatcher) displayPeakWords() (string, []string) {
 	return result.String(), printedEntries
 }
 
-// TODO: Feels like its either too much or not going far enough?
-//
-//	Supposed to be a lightweight wrapper on WordStats for sorting.
-//	Was probably more important when it was processing entire word lists.
+// wordEntry is the compact sortable view of WordStats used by top-N selection.
 type wordEntry struct {
 	word       string
 	key        string
@@ -1156,11 +1125,8 @@ func (m *InterestingWordMatcher) topWordEntries() []wordEntry {
 		for _, entry := range topList {
 			word := entry.key
 			stats := m.wordFrequency[word]
-			// pretty sure these aren't needed
-			//if stats == nil {
-			//	// its been timed out!
-			//	continue
-			//}
+			// topList is derived from wordFrequency during this call, so stats
+			// should still be present unless the selection source changes.
 
 			// list ordering is based on peakWordEntry.countPlusFirst order
 			countPlusFirst := stats.primeFlux
@@ -1174,8 +1140,7 @@ func (m *InterestingWordMatcher) topWordEntries() []wordEntry {
 			}
 			// ShouldConsider() logic pulled out and inlined here
 			if len(h) < limit || countPlusFirst > h[0].count {
-				// Pulling up ShouldConsider logic and making MaybeForSureAdd dumber
-				// and assume these checks already passed
+				// Eligibility is checked before insertion so the heap helper can stay minimal.
 				m.topTracker.MaybeForSureAdd(wordEntry{
 					word:       word,
 					count:      countPlusFirst,
@@ -1191,16 +1156,12 @@ func (m *InterestingWordMatcher) topWordEntries() []wordEntry {
 		for _, entry := range topList {
 			word := entry.key
 			stats := m.wordFrequency[word]
-			// pretty sure these aren't needed
-			//if stats == nil {
-			//	// its been timed out!
-			//	continue
-			//}
+			// topList is derived from wordFrequency during this call, so stats
+			// should still be present unless the selection source changes.
 			countPlusFirst := stats.primeFlux
-			// Pulling up ShouldConsider logic and making MaybeForSureAdd dumber and assume these checks already passed
 			// ShouldConsider() logic pulled out and inlined here
 			if len(h) < limit || countPlusFirst > h[0].count {
-				// assumes above condition already passed
+				// Eligibility is checked before insertion so the heap helper can stay minimal.
 				m.topTracker.MaybeForSureAdd(wordEntry{
 					word:       word,
 					count:      countPlusFirst,
@@ -1345,8 +1306,7 @@ func (m *InterestingWordMatcher) selectDisplayItemByKey(selection string) (int, 
 	return idx, true
 }
 
-// secondaryEntryMetric is the extra info displayed on the right side of every entry
-// TODO: Tab cycles through current, countPlusFirst+last, historyDepth
+// secondaryEntryMetric is the tab-cycled info displayed on the right side of every entry.
 func (m *InterestingWordMatcher) secondaryEntryMetric(stats *WordStats, nDenom float64) string {
 	switch PattyGraph.tabViewIndexKey {
 	case 0:

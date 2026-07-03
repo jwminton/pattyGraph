@@ -7,7 +7,7 @@ import "sync"
 
 // ringSeriesAccumulator is a GC-free, reusable time-series buffer with tail-aligned merge support.
 // It is intended for use in high-throughput systems where allocations must be tightly controlled.
-// ringBuffers know how to wrap but they're terrible at aggregation
+// ringBuffer handles wrapping; ringSeriesAccumulator handles aggregate interval updates.
 type ringSeriesAccumulator struct {
 	data  [80]int
 	len   int // logical length (<= len(data))

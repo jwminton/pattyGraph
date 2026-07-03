@@ -11,7 +11,13 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// Flag metadata struct
+// flags.go owns PattyGraph's command-line surface: flag metadata, generated
+// usage/help output, argument parsing, and MonitorConfig construction. Runtime
+// flag effects are also reused by config replay and inline commands, so this
+// file is intentionally metadata-driven instead of scattering pflag calls.
+
+// flagInfo describes one CLI flag and the type-specific map used to retrieve it
+// after pflag parses command-line input.
 type flagInfo struct {
 	Name         string
 	Short        string
@@ -20,10 +26,9 @@ type flagInfo struct {
 	FlagType     string // "int", "string", "float64", "bool", "stringArray"
 }
 
-// Centralized flag metadata
-// All flag behavior is driven here and then turned into config data post pflag.parse
-// These names are used again by category classification and then
-// in the type specific value maps at the end for MonitorConfig creation
+// flags is the canonical command-line metadata table. These names are reused by
+// usage category rendering, config replay, inline command handling, and final
+// MonitorConfig creation.
 var flags = []flagInfo{
 	{"title", "t", "", "Set title for display labeling (defaults to machine name)", "string"},
 	{"save-dir", "d", "", "Directory to save configs & splats", "string"},
@@ -46,8 +51,8 @@ var flags = []flagInfo{
 type MonitorConfig struct {
 	filePath        string
 	excludeRequest  bool
-	saveDir         string // eg. /home/user/patty
-	saveDirOriginal string // eg. ~/patty
+	saveDir         string // expanded save directory, e.g. /home/user/patty
+	saveDirOriginal string // user-provided save directory, e.g. ~/patty
 	builtinConfFile string
 	mbToRead        int
 }
@@ -180,7 +185,8 @@ func parseArgs() *MonitorConfig {
 		os.Exit(0) // You decide the exit behavior
 	}
 
-	// TODO: consolidate with post-config file consumption flag processing... someday
+	// Preserve the configured path so startup can replay the same config source
+	// after flag parsing finishes.
 	mConf.builtinConfFile = *stringMap["config"]
 
 	// Each type was added to the corresponding map for retrieval here

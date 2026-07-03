@@ -19,6 +19,18 @@ import (
 	"github.com/spf13/pflag"
 )
 
+// PattyGraph is a singleton tool. It uses a deliberately narrow concurrency
+// model around one shared Monitor instance:
+//
+//	startFileMonitoring()        // tails the access log data plane
+//	startControlFileMonitoring() // tails the control file command plane
+//	startUI()                    // launches display
+//
+// The access-log reader, control-file reader, and tview display loop take turns
+// on the same model lock. Keeping the hot path lean makes this simpler model
+// practical, and the small per-area scratch caches avoid repeated allocation
+// without requiring a shared pool.
+
 var PattyGraph *Monitor
 
 var InterestingWordListSize = 100 // todo This needs to be settable
@@ -40,28 +52,6 @@ var logLoadLinecount uint64
 var logLoadIntervalCount int
 var logLoadGCCost int64
 
-// PattyGraph is logically, hopelessly and naively "single threaded"
-// (ignoring support threads):
-//
-//	startFileMonitoring()        // tails the access log data plane
-//	startControlFileMonitoring() // tails the control file command plane
-//	startUI()                    // launches display
-//
-// There's a match thread that's running off of access log reading, a control thread that's
-// reading inline commands from pattyControl.log, and the display thread that's queueing
-// display events into tview's display cycle. These active processes take turns being
-// active on the same lock. The result is within the
-// PattyGraph codebase, it can be naively single threaded. This wasn't the initial
-// idea but even early coordination at top matcher levels was seeing horrible timing
-// issues. Turns out, when everything is lean and fast enough, a naive approach can work.
-// If this was ever an issue, batching would be the way to go, but its never been an issue.
-// The display thread shouldn't be altering the underlying model of counts per interval
-// calculations but it does perform the push(). It may be enough to lock the push() if
-// parallelism is ever wanted.
-//
-// Because of the single threadedness of everything, and I'm not overly concerned about
-// space, I have a number of slice caches located by area of need. If there were threading
-// issues, these would be better in a reusable Pool.
 func main() {
 	// This should already be the default but lets be sure since terminal output on a panic is lost
 	log.SetOutput(os.Stderr)
@@ -82,37 +72,13 @@ func main() {
 	PattyGraph = NewMonitor(mConf)
 	botsIndex = botsMatcherIndex()
 
-	cpuName, heapName, allocName := "", "", ""
-	// symbol table drop flag in ./compile.sh may need to be adjusted
-	/****** for profiling ******/
-	//timeKey := time.Now().Format("0102_1504")
-	//// CPU
-	//cpuName = fmt.Sprintf("cpu_pattyGraph_%s.prof", timeKey)
-	//f, _ := os.Create(cpuName)
-	//pprof.StartCPUProfile(f)     // Start CPU profiling
-	//defer pprof.StopCPUProfile() // Stop profiling and write to file
-	//
-	////Heap & Alloc
-	//heapName = fmt.Sprintf("heap_pattyGraph_%s.pb.gz", timeKey)
-	//allocName = fmt.Sprintf("alloc_pattyGraph_%s.pb.gz", timeKey)
-	//defer func() {
-	//	f, _ := os.Create(heapName)
-	//	pprof.Lookup("heap").WriteTo(f, 0)
-	//
-	//	f2, _ := os.Create(allocName)
-	//	pprof.Lookup("allocs").WriteTo(f2, 0)
-	//}()
-	/****** end profiling ******/
+	// Hot-path profiling is kept commented so runtime/pprof is not imported in
+	// normal builds. Uncomment the helper below and this call site when doing
+	// deep preload/matching/TUI startup profiling.
+	//cpuName, heapName, allocName, stopProfiling := maybeStartHotPathProfiling()
+	//defer stopProfiling()
+	//fmt.Printf("Profiles: cpu=%s heap=%s alloc=%s\n", cpuName, heapName, allocName)
 
-	if cpuName != "" {
-		fmt.Printf("CPU profile written to: %s\n", cpuName)
-	}
-	if heapName != "" {
-		fmt.Printf("Heap profile written to: %s\n", heapName)
-	}
-	if allocName != "" {
-		fmt.Printf("Alloc profile written to: %s\n", allocName)
-	}
 	PattyGraph.playConfigFile(mConf.builtinConfFile)
 	enforceCliFlags()
 	startControlFileMonitoring()
@@ -139,11 +105,8 @@ func main() {
 }
 
 func enforceCliFlags() {
-	// CLI Overrides happens here.
-	// This is terrible but I just didn't want to redo everything else around this for now
-	// The goodness this provides far outweighs the distaste of repeating config logic in 3 places
-	// TODO: consolidate with other places that do this and reuse inline command interpretation instead of
-	//       going straight to setting the values.
+	// Reapply explicitly provided CLI flags after config replay so command-line
+	// choices remain authoritative.
 	pflag.Visit(func(f *pflag.Flag) {
 		switch f.Name {
 		case "read":
@@ -367,6 +330,61 @@ type MinuteGroup struct {
 	Timestamp time.Time
 	Lines     []string
 }
+
+// Hot-path profiling helper.
+//
+// To use:
+//  1. Add "runtime/pprof" to the imports.
+//  2. Uncomment this helper.
+//  3. Uncomment the maybeStartHotPathProfiling call near the top of main().
+//
+// Keep this close to runtime startup: hot-path profiling is most useful when it
+// captures preload, matching, push, and TUI startup behavior together. The
+// symbol table drop flag in compile.sh may need adjustment before interpreting
+// profiles.
+//
+//func maybeStartHotPathProfiling() (cpuName string, heapName string, allocName string, stop func()) {
+//	timeKey := time.Now().Format("0102_1504")
+//
+//	cpuName = fmt.Sprintf("cpu_pattyGraph_%s.prof", timeKey)
+//	cpuFile, err := os.Create(cpuName)
+//	if err != nil {
+//		log.Printf("CPU profile create failed: %v", err)
+//		cpuName = ""
+//	} else if err := pprof.StartCPUProfile(cpuFile); err != nil {
+//		log.Printf("CPU profile start failed: %v", err)
+//		cpuFile.Close()
+//		cpuName = ""
+//	}
+//
+//	heapName = fmt.Sprintf("heap_pattyGraph_%s.pb.gz", timeKey)
+//	allocName = fmt.Sprintf("alloc_pattyGraph_%s.pb.gz", timeKey)
+//
+//	return cpuName, heapName, allocName, func() {
+//		if cpuName != "" {
+//			pprof.StopCPUProfile()
+//			cpuFile.Close()
+//		}
+//
+//		if heapName != "" {
+//			if f, err := os.Create(heapName); err == nil {
+//				pprof.Lookup("heap").WriteTo(f, 0)
+//				f.Close()
+//			} else {
+//				log.Printf("heap profile write failed: %v", err)
+//			}
+//		}
+//
+//		if allocName != "" {
+//			if f, err := os.Create(allocName); err == nil {
+//				pprof.Lookup("allocs").WriteTo(f, 0)
+//				f.Close()
+//			} else {
+//				log.Printf("alloc profile write failed: %v", err)
+//			}
+//		}
+//	}
+//}
 
 func handlePanicToFile() {
 	saveDir := PattyGraph.pattyConfig.saveDir
