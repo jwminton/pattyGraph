@@ -680,7 +680,7 @@ func NewFactoidGenerator() *FactoidGenerator {
 			strings.TrimSpace(formatCounts(singles)),
 			percent,
 		)
-	}))
+	}), "interesting", "oneHitRefs")
 	g.Add(Random(15, func(_ []string) string {
 		singles := 0
 		total := len(PattyGraph.wordsMatcher.wordFrequency)
@@ -697,7 +697,7 @@ func NewFactoidGenerator() *FactoidGenerator {
 			strings.TrimSpace(formatCounts(singles)),
 			percent,
 		)
-	}))
+	}), "interesting", "oneHitWords")
 
 	g.Add(Random(15, func(_ []string) string {
 		singles := 0
@@ -715,7 +715,7 @@ func NewFactoidGenerator() *FactoidGenerator {
 			strings.TrimSpace(formatCounts(singles)),
 			percent,
 		)
-	}))
+	}), "interesting", "oneHitIPs")
 	//g.Add(Repeating(15, func(_ []string) string {
 	//	matchers := PattyGraph.matchers
 	//	n := len(matchers)

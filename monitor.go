@@ -688,6 +688,9 @@ func invokeInlineCommand(line string) InlineCommandResult {
 				patterns = []string{name}
 			}
 		}
+		if matcherNameExists(name) && !(name == "Bots" && isRegex && len(patterns) == 0) {
+			return inlineCommandRejected(cmd, "add_matcher", "duplicate matcher name")
+		}
 		//newM := PattyGraph.createMatcher(name, isLikelyIPPattern(name), patterns)
 		var newM *Matcher
 		if isRegex {
@@ -969,7 +972,6 @@ func invokeInlineCommand(line string) InlineCommandResult {
 		result.Result["value"] = value
 		return result
 	}
-	return inlineCommandResult(cmd, InlineCommandStatusIgnored, "noop")
 }
 
 func invokeAlertCommand(cmd string, args []string, line string) InlineCommandResult {
@@ -1046,6 +1048,10 @@ func findMatcherByName(name string) *Matcher {
 		}
 	}
 	return nil
+}
+
+func matcherNameExists(name string) bool {
+	return findMatcherByName(name) != nil
 }
 
 func validateAlertBound(matcher *Matcher, direction string, threshold int) error {
@@ -1562,6 +1568,27 @@ func (m *Monitor) pattyPushFactorIncr(increment int) bool {
 	return false
 }
 
+/*
+*
+
+		PattyGraph intentionally treats the terminal screen as a rendered coordinate
+		surface rather than a tree of tview widgets. The display panes are text views,
+		but the interaction model is visual: clicks are interpreted by X/Y position
+		against stable screen regions such as the matcher graph, matcher breakdowns,
+		words, refs, and IPs.
+
+		setUIHook is therefore the TUI controller. It maps keyboard and mouse gestures
+		onto PattyGraph’s live operational model: matcher selection, interesting-key
+		selection, graph value inspection, display-mode cycling, matcher promotion, and
+		runtime tuning.
+
+		Basically:
+	    this is not accidental spaghetti
+	    it is a deliberate controller layer
+	    tview widgets are rendering surfaces, not the interaction model
+	    the UI behavior is spatial and section-based
+	    the function is large because the controller owns the full gesture vocabulary
+*/
 func setUIHook() {
 	PattyGraph.app.SetMouseCapture(func(event *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
 		// Set up event handling
@@ -1884,6 +1911,9 @@ func setUIHook() {
 			} else if PattyGraph.selectedInterestingMatcher != nil {
 				newPattern := PattyGraph.selectedInterestingMatcher.selectedKey
 				if newPattern != "" {
+					if matcherNameExists(newPattern) {
+						return nil
+					}
 					var newM *Matcher
 					fmtString := ""
 					if event.Key() == tcell.KeyCtrlN {

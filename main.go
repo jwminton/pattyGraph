@@ -204,10 +204,13 @@ func dumpFacts() {
 	}
 	sort.Strings(names)
 
-	// Print in 5-column layout, left-aligned
+	const factHelpColumns = 4
+	const factHelpColumnWidth = 24
+
+	// Print in a fixed-column layout, left-aligned
 	for i, name := range names {
-		fmt.Printf("%-18s", name)
-		if i%5 == 4 || i == len(names)-1 {
+		fmt.Printf("%-*s", factHelpColumnWidth, name)
+		if i%factHelpColumns == factHelpColumns-1 || i == len(names)-1 {
 			fmt.Println()
 		}
 	}

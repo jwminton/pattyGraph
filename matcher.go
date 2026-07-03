@@ -169,6 +169,9 @@ func (m *Matcher) migrateBots(threshold float64) {
 	if topCount == 0 {
 		return
 	}
+	if matcherNameExists(topBot) {
+		return
+	}
 	if topCount < m.intervalCount {
 		m.intervalCount -= topCount
 	} else {

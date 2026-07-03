@@ -14,6 +14,16 @@ func matcherIndexByNameForTest(name string) int {
 	return -1
 }
 
+func matcherCountByNameForTest(name string) int {
+	count := 0
+	for _, matcher := range PattyGraph.matchers {
+		if matcher.matcherName() == name {
+			count++
+		}
+	}
+	return count
+}
+
 func TestInlineAddUndecoratedNameInsertsBeforeBots(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 
@@ -67,6 +77,63 @@ func TestInlineAddStarNameInsertsBelowBotsBeforeLines(t *testing.T) {
 	}
 	if googlebotIndex != linesIndex-1 {
 		t.Fatalf("googlebot index = %d, want immediately before lines at %d", googlebotIndex, linesIndex-1)
+	}
+}
+
+func TestInlineAddRejectsDuplicateMatcherName(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	first := invokeInlineCommand("!!! add googlebot")
+	if first.Status != InlineCommandStatusApplied {
+		t.Fatalf("first status = %q, want applied: %#v", first.Status, first.Result)
+	}
+
+	duplicate := invokeInlineCommand("!!! add googlebot")
+	if duplicate.Status != InlineCommandStatusRejected {
+		t.Fatalf("duplicate status = %q, want rejected: %#v", duplicate.Status, duplicate.Result)
+	}
+	if duplicate.Result["error"] != "duplicate matcher name" {
+		t.Fatalf("duplicate error = %v, want duplicate matcher name", duplicate.Result["error"])
+	}
+	if got := matcherCountByNameForTest("googlebot"); got != 1 {
+		t.Fatalf("googlebot matcher count = %d, want 1", got)
+	}
+}
+
+func TestInlineAddRejectsDuplicateMatcherNameAcrossPlacementPrefixes(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	first := invokeInlineCommand("!!! add +googlebot")
+	if first.Status != InlineCommandStatusApplied {
+		t.Fatalf("first status = %q, want applied: %#v", first.Status, first.Result)
+	}
+
+	duplicate := invokeInlineCommand("!!! add *googlebot")
+	if duplicate.Status != InlineCommandStatusRejected {
+		t.Fatalf("duplicate status = %q, want rejected: %#v", duplicate.Status, duplicate.Result)
+	}
+	if got := matcherCountByNameForTest("googlebot"); got != 1 {
+		t.Fatalf("googlebot matcher count = %d, want 1", got)
+	}
+}
+
+func TestInlineAddMatcherNamesAreCaseSensitive(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	lower := invokeInlineCommand("!!! add googlebot")
+	if lower.Status != InlineCommandStatusApplied {
+		t.Fatalf("lower status = %q, want applied: %#v", lower.Status, lower.Result)
+	}
+	upper := invokeInlineCommand("!!! add Googlebot")
+	if upper.Status != InlineCommandStatusApplied {
+		t.Fatalf("upper status = %q, want applied: %#v", upper.Status, upper.Result)
+	}
+
+	if got := matcherCountByNameForTest("googlebot"); got != 1 {
+		t.Fatalf("googlebot matcher count = %d, want 1", got)
+	}
+	if got := matcherCountByNameForTest("Googlebot"); got != 1 {
+		t.Fatalf("Googlebot matcher count = %d, want 1", got)
 	}
 }
 

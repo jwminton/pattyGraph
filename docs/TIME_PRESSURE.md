@@ -330,32 +330,30 @@ entries out of the interesting columns.
 
 Some factoids expose the same pressure from another angle.
 
-The `mem.newEntries` factoid displays as `ΔNew w/r/i`. It reports the recent
-rate of newly created interesting entries for `words`, `refs`, and `ips`
-compared with interval line volume. High values can mean the stream is seeing
-broad, shallow churn: many keys are being created, but many of them may never
-survive long enough to build useful history.
+The `interesting.oneHitRefs`, `interesting.oneHitWords`, and
+`interesting.oneHitIPs` factoids display as `1-Hit Refs`, `1-Hit Words`, and
+`1-Hit IPs`. They show how much of each interesting stream is barely surviving
+in the current recency window by counting keys whose `primeFlux` is `1`.
 
 Example:
 
 ```text
-ΔNew w:35% r:4% i:2%
+1-Hit Refs:42(68%)
 ```
 
 Read that as:
 
 ```text
-words are creating many new keys relative to current line volume
-refs are mostly reusing known keys
-ips are mostly reusing known sources
+42 tracked referer keys have only one unit of recent pressure
+those keys are 68% of the current refs working set
 ```
 
-That pattern suggests the request/User-Agent token stream is broad or changing,
-while referers and IPs are comparatively stable. Under stronger `push`, many of
-those new `words` keys may age out quickly. Under weaker `push`, more of them
-may remain visible long enough to build history.
+That pattern suggests broad, shallow activity. Many keys are present, but most
+of them are barely repeating inside the current `flux` window. Under stronger
+`push`, many of those shallow keys may age out quickly. Under weaker `push`,
+more of them may remain visible long enough to build history.
 
-That factoid can help explain why the interesting columns feel busy, thin, or
+These factoids can help explain why the interesting columns feel busy, thin, or
 unstable under a given `push` setting.
 
 ## Tuning By Traffic Shape
