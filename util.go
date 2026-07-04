@@ -552,6 +552,10 @@ func botsMatcherIndex() int {
 	return -1 // can't happen
 }
 
+// UpdateHistoricFlags re-derives the historical scaling boundary from the current
+// Bots position. Rows through Bots share global sparkline scale; concrete rows
+// below Bots use local scale. Interesting streams terminate this pass because
+// they are MatcherFacade rows without concrete Matcher history semantics.
 func UpdateHistoricFlags() {
 	PattyGraph.overallMax = -1 // cache invalidator
 	//_, PattyGraph.dynamicPeakThreshold, _ = PattyGraph.minAvgMaxHistoryAcrossMatchers()
@@ -562,13 +566,13 @@ func UpdateHistoricFlags() {
 		return
 	}
 
-	// Set isHistoric = true for matchers before botsMatcher
+	// Rows through Bots share historical scale.
 	for i := 0; i <= botsIndex; i++ {
 		PattyGraph.matchers[i].asMatcher().isHistorical = true
 		PattyGraph.matchers[i].asMatcher().historySparklineCache = ""
 	}
 
-	// Set isHistoric = false for botsMatcher and everything after
+	// Concrete rows after Bots use local scale until interesting streams begin.
 	for i := botsIndex + 1; i < len(PattyGraph.matchers); i++ {
 		if PattyGraph.matchers[i].asMatcher() == nil {
 			break
@@ -578,6 +582,9 @@ func UpdateHistoricFlags() {
 	}
 }
 
+// insertMatcherFirst places a matcher at the top of the competitive lane.
+// This is used by explicit + placement and promotions that should compete
+// before all other matcher rows.
 func insertMatcherFirst(oldMatchers []MatcherFacade, newMatcher MatcherFacade) []MatcherFacade {
 	matchers := append([]MatcherFacade{newMatcher}, oldMatchers...)
 	setMatcherColor(newMatcher.asMatcher())
@@ -585,10 +592,11 @@ func insertMatcherFirst(oldMatchers []MatcherFacade, newMatcher MatcherFacade) [
 	return matchers
 }
 
+// insertMatcherBeforeBots places a matcher in the competitive lane immediately
+// above Bots. This is the default user-added matcher position.
 func insertMatcherBeforeBots(matchers []MatcherFacade, newMatcher MatcherFacade) []MatcherFacade {
 	for i, matcher := range matchers {
 		if matcher.matcherName() == "Bots" {
-			// Insert newMatcher at selectedGraphPosition i by creating a new slice
 			matchers = append(matchers[:i], append([]MatcherFacade{newMatcher}, matchers[i:]...)...)
 			setMatcherColor(newMatcher.asMatcher())
 			newMatcher.asMatcher().isHistorical = true
@@ -597,13 +605,14 @@ func insertMatcherBeforeBots(matchers []MatcherFacade, newMatcher MatcherFacade)
 	}
 	return matchers
 }
+
+// insertMatcherBeforeLines places a matcher below Bots but above system rows.
+// These rows observe every remaining line instead of competing before Bots.
 func insertMatcherBeforeLines(matchers []MatcherFacade, newMatcher MatcherFacade) []MatcherFacade {
 	for i, matcher := range matchers {
 		if matcher.matcherName() == "lines" {
-			// Insert newMatcher at selectedGraphPosition i by creating a new slice
 			matchers = append(matchers[:i], append([]MatcherFacade{newMatcher}, matchers[i:]...)...)
 			setMatcherColor(newMatcher.asMatcher())
-			// this might be unneeded
 			newMatcher.asMatcher().isHistorical = false
 			break
 		}

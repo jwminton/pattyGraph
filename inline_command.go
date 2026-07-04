@@ -14,6 +14,13 @@ import (
 	"strings"
 )
 
+// Inline commands are PattyGraph's shared configuration and control language.
+// Startup config files, control-file input, and log lines prefixed with
+// InlinePreamble all converge here so matcher setup, runtime setting changes,
+// and live actions behave the same no matter which surface delivered them.
+// Generated config files are replayable command streams, not a separate config
+// format.
+
 const (
 	InlineCommandStatusApplied  = "applied"
 	InlineCommandStatusIgnored  = "ignored"
@@ -41,6 +48,9 @@ func inlineCommandRejected(commandName string, action string, message string) In
 	return result
 }
 
+// invokeInlineCommand applies one command after its source has already been
+// accepted as command input. The caller decides whether the source was a log
+// injection, control-file line, or config replay; command semantics stay here.
 func invokeInlineCommand(line string) InlineCommandResult {
 	// Assume '!!! ' prefix already detected
 	commandLine := line[4:]
@@ -148,6 +158,9 @@ func invokeInlineCommand(line string) InlineCommandResult {
 			return line
 		}
 		placement := "before_bots"
+		// Name prefixes choose the matcher lane: + goes first in the
+		// competitive lane, -/default goes immediately before Bots, and * goes
+		// below Bots before system rows so it observes instead of competes.
 		switch originalName[0:1] {
 		case "*":
 			placement = "before_lines"
@@ -618,7 +631,9 @@ func dumpConfig() {
 }
 
 func writeConfig(w io.Writer) {
-	// TODO: Could just write everything out and then wrap all lines with the preamble
+	// Config output is intentionally serialized as inline commands. Replay uses the
+	// same interpreter as live control, which keeps saved matcher state and startup
+	// configuration aligned with runtime behavior.
 	if machineDisplayName != "" {
 		io.WriteString(w, fmt.Sprintf(InlinePreamble+" title '%s'\n", machineDisplayName))
 	}
@@ -662,7 +677,7 @@ func writeConfig(w io.Writer) {
 				io.WriteString(w, alertLine+"\n")
 			}
 		}
-	} // Iterate through matchers and write their inline command representation
+	}
 	for _, m := range PattyGraph.matchers {
 		if m == nil {
 			continue

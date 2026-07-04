@@ -8,13 +8,32 @@ import (
 	"sync"
 )
 
-// WordStats stores the retained state for one interesting key.
+// WordStats is the retained state for one interesting key in an InterestingWordMatcher.
 //
-// All three values get used in hotpaths: count, first, count+first.
-// Invariant: primeFlux = count + nFlux
-// Invariant: nFlux = history[0] or 0
-// Maintained manually during creation, push() and count increment sites.
-// Doing the math at mutation time and keeping the cache in sync is a huge win bc its such a hot-path item.
+// Lifecycle:
+//   - newWordStats captures the current line source, current status, User-Agent
+//     tokens, and starts the key at count/primeFlux 1.
+//   - match-time updates increment count, bytes, primeFlux, last-seen log time,
+//     retained source examples, capture color, and User-Agent delta state.
+//   - push moves the interval count into history, refreshes primeFlux from recent
+//     history, clears interval counters, and invalidates cached history views.
+//   - stale non-peak entries are recycled through wordStatsPool so the hot path
+//     can reuse buffers and source holders without repeated allocation.
+//
+// WordStats became central because PattyGraph does not only count keys; it keeps
+// enough compact state to rank recency, show retained examples, mark capture
+// provenance, compare User-Agent shifts, and decide whether a key survives time
+// pressure.
+//
+// The cached fields are maintained at mutation time because count, history[0],
+// and count+recent-history are read constantly by ranking and display code.
+// Keep changes to these invariants narrow and test-backed.
+//
+// Invariants:
+//   - primeFlux = count + historyBuf.nFlux(fluxDepth)
+//   - after push, count and bytes are reset for the new interval
+//   - history slice caches are invalidated when history changes
+//   - source points to a reusable lineSource owned by this WordStats instance.
 type WordStats struct {
 	// --- Counters and derived metrics ---
 	count            int
@@ -107,9 +126,8 @@ func (w *WordStats) burstiness() float64 {
 	variance /= depth
 	stdDev := math.Sqrt(variance)
 
-	// This has evolved so many times. Still iffy :(
+	// This has evolved so many times, settling on this as a "final form"
 	w.burstiCache = (stdDev / mean) * (1 + w.agentDeltaMetric) * depthScale
-	//w.burstiCache = (stdDev / mean) * (1 + w.agentDeltaMetric)
 	return w.burstiCache
 }
 

@@ -12,9 +12,22 @@ import (
 	"strings"
 )
 
-// InterestingWordMatcher tracks high-signal words, refs, and IPs under log-time
-// pressure. Each stream observes the lines it receives, retains compact history
-// for keys that keep proving relevant, and exposes selectable rows for the TUI.
+// InterestingWordMatcher is the central stream type behind PattyGraph's
+// Interesting Words, Refs, and IPs columns. It is intentionally denser than a
+// simple token counter: each stream parses one slice of the current log line,
+// tokenizes it, scores repeated context under log-time pressure, retains compact
+// history, tracks peak entries, keeps selectable TUI rows stable, and stores a
+// few source examples for inspection.
+//
+// The retention model is intentionally GC-like: every key has a last-seen log
+// time, and each stream applies constant pressure to age out shallow or quiet
+// entries. Repeated context, recent flux, and peak status keep an entry alive;
+// one-off noise naturally disappears without reducing the stream to a fixed-size
+// top-N snapshot.
+//
+// Code in this file often balances three concerns at once: hot-path matching,
+// retained signal quality, and display behavior. When changing it, identify
+// which concern owns the change before trying to detangle the whole type.
 type InterestingWordMatcher struct {
 	mName             string
 	timeToLive        int

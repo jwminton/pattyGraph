@@ -19,19 +19,18 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// PattyGraph is a singleton tool. It uses a deliberately narrow concurrency
-// model around one shared Monitor instance:
+// PattyGraph is a terminal tool, not a library. It intentionally runs as one
+// process-wide singleton around a shared Monitor instance:
 //
 //	startFileMonitoring()        // tails the access log data plane
 //	startControlFileMonitoring() // tails the control file command plane
 //	startUI()                    // launches display
 //
 // The access-log reader, control-file reader, and tview display loop take turns
-// on the same model lock. Keeping the hot path lean makes this simpler model
-// practical, and the small per-area scratch caches avoid repeated allocation
-// without requiring a shared pool.
-
-var PattyGraph *Monitor
+// on the same model lock. Some code reaches global runtime state directly where
+// a reusable library would pass dependencies more conservatively; that tradeoff
+// keeps the hot path simple, fast, and allocation-light for an interactive TUI
+// whose whole process exists to observe one log stream.
 
 var InterestingWordListSize = 100 // todo This needs to be settable
 var colorIndex = 0

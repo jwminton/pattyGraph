@@ -24,11 +24,20 @@ import (
 // instance, PattyGraph, so runtime settings and UI state flow through this
 // structure.
 //
-// Matcher order is meaningful. Rows above Bots compete for each log line first;
-// at most one of those rows claims the line. Bots then handles remaining bot-like
-// traffic, and rows below Bots observe every line for system counts and
-// interesting words, refs, and IPs. This ordering is also the visual lane order
-// used by the TUI and inline matcher insertion.
+// Matcher order is meaningful. Conceptually, each parsed log line is dropped
+// through an ordered stack of matcher sieves. A row may add semantics to
+// currentLine as the line passes, but lower rows do not reach back upward to
+// change earlier decisions.
+//
+// Rows above Bots are competitive: at most one row claims a log line before
+// Bots sees it. Bots is the boundary row for unclaimed bot-family traffic. Rows
+// below Bots are observational: they see the parsed line after the competitive
+// phase and add system counts plus interesting words, refs, and IPs.
+//
+// The same order drives TUI row layout, inline matcher insertion, bot/IP
+// promotion, remembered-IP tagging, and historical sparkline scaling. Matchers
+// above Bots plus Bots itself share global historical scale; rows below Bots
+// generally use local scale and do not compete for ownership of the line.
 type Monitor struct {
 	pattyConfig *MonitorConfig
 
@@ -76,15 +85,27 @@ type Monitor struct {
 	pendingAlertTransitions []AlertTransition
 }
 
-var mu sync.RWMutex             // Add RWMutex for synchronization
-var currentLine = &lineSource{} // line currently being processed (only valid from match cycle)
-var uaCardinalityMap = make(map[int]uint64, 20)
-var totalAgentTokenCount uint64
+// PattyGraph's process-wide runtime anchors are grouped here because they are
+// shared by the access-log reader, control-file reader, matcher pipeline, and
+// TUI. PattyGraph is a terminal tool, not a reusable library; these globals make
+// the hot path direct while keeping the intentional shared state visible.
+var PattyGraph *Monitor
+
+var mu sync.RWMutex             // shared model lock across readers and TUI updates
+var currentLine = &lineSource{} // line currently being processed; only valid during a match cycle
 
 // Cycle counters are package-level because parsing, matching, and display all
 // read the same log-time position during the hot path.
-var currentCycle int  // the current cycle number counting UP to DefaultIntervalSize
-var logicalCycles int // Number of cycles real (or skipped by reading previous lines on startup)
+var currentCycle int  // current cycle number counting up to DefaultIntervalSize
+var logicalCycles int // completed or skipped cycles since startup
+
+// botsIndex is the matcher ordering boundary. Rows above Bots compete for a
+// line, Bots receives unclaimed bot-family traffic, and rows below Bots observe
+// the line without claiming it.
+var botsIndex = -1
+
+var uaCardinalityMap = make(map[int]uint64, 20)
+var totalAgentTokenCount uint64
 
 // MatcherFacade is the shared lane interface for PattyGraph's ordered TUI rows.
 //
@@ -395,7 +416,9 @@ func match(line string) {
 			currentLine.userAgentDelta = levenshteinTokensRatio(prevStats.agentTokensFromSource, currentLine.userAgentTokens)
 		}
 	}
-	// Only concrete matcher rows can tag remembered IPs before bot competition.
+	// Remembered-IP tagging runs before bot competition so promoted matchers above
+	// Bots can mark traffic they previously learned, even if the current line no
+	// longer carries the original identifying User-Agent.
 	for i, matcher := range PattyGraph.matchers {
 		if i < botsIndex {
 			basicMatcher := matcher.asMatcher() // no interesting matchers should be here
@@ -408,7 +431,8 @@ func match(line string) {
 			//}
 		}
 	}
-	// let the autobots & Bots compete for the match
+	// Competitive phase: rows above Bots and Bots itself get first claim.
+	// A successful match stops this phase; reaching Bots also stops it.
 	for i, matcher := range PattyGraph.matchers {
 		if matcher.match() {
 			break
@@ -417,7 +441,8 @@ func match(line string) {
 			break
 		}
 	}
-	// Now the un-historic matchers (lines, bytes, errors, Interesting, -C additions) all get their match time
+	// Observational phase: rows below Bots all see the line, including system
+	// counters, interesting streams, and matchers intentionally placed below Bots.
 	for i, matcher := range PattyGraph.matchers {
 		if i > botsIndex {
 			matcher.match()

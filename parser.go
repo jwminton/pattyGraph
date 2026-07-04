@@ -139,8 +139,6 @@ func splitLogLineParts(fullLine string) (string, string, string, string, string,
 	return request, resp, bytes, referer, agent, nil
 }
 
-var botsIndex = -1
-
 // Executed once a cycle for status display only
 func extractTimestamp(s string) (*time.Time, error) {
 	start := strings.IndexByte(s, '[')
