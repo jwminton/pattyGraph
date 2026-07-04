@@ -354,7 +354,7 @@ func invokeInlineCommand(line string) InlineCommandResult {
 		result.Result["enabled"] = PattyGraph.showTicker
 		return result
 	case "history", "HISTORY":
-		showMetricsPanelContents = !showMetricsPanelContents
+		togglePreamble()
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "toggle_fact_history")
 		result.Result["enabled"] = showMetricsPanelContents
 		return result

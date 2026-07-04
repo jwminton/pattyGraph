@@ -1092,16 +1092,51 @@ func tipText(tip string) string {
 	return "[blue]Tip:[default] " + tip
 }
 
-var showMetricsPanelContents bool // toggle panel contents
-var tickerPreamble = defaultTickerBg
+type bottomPanelMode int
 
-func togglePreamble() {
-	showMetricsPanelContents = !showMetricsPanelContents
-	if showMetricsPanelContents {
+const (
+	bottomPanelMatchers bottomPanelMode = iota
+	bottomPanelFactoids
+	bottomPanelHelp
+)
+
+var (
+	bottomPanelCurrent       = bottomPanelMatchers
+	bottomPanelReturnMode    = bottomPanelMatchers
+	showMetricsPanelContents bool // true when the bottom-left panel is showing factoids
+	tickerPreamble           = defaultTickerBg
+)
+
+func syncBottomPanelState() {
+	showMetricsPanelContents = bottomPanelCurrent == bottomPanelFactoids
+	if bottomPanelCurrent == bottomPanelFactoids ||
+		(bottomPanelCurrent == bottomPanelHelp && bottomPanelReturnMode == bottomPanelFactoids) {
 		tickerPreamble = selectedTickerBg
 	} else {
 		tickerPreamble = defaultTickerBg
 	}
+}
+
+func togglePreamble() {
+	if bottomPanelCurrent == bottomPanelFactoids {
+		bottomPanelCurrent = bottomPanelMatchers
+	} else {
+		bottomPanelCurrent = bottomPanelFactoids
+	}
+	if bottomPanelCurrent != bottomPanelHelp {
+		bottomPanelReturnMode = bottomPanelCurrent
+	}
+	syncBottomPanelState()
+}
+
+func toggleHelpPanel() {
+	if bottomPanelCurrent == bottomPanelHelp {
+		bottomPanelCurrent = bottomPanelReturnMode
+	} else {
+		bottomPanelReturnMode = bottomPanelCurrent
+		bottomPanelCurrent = bottomPanelHelp
+	}
+	syncBottomPanelState()
 }
 
 func currentTickerText() string {
@@ -1120,6 +1155,31 @@ func currentTickerText() string {
 	// Advance scroll position
 	tickerVisibleOffset += scrollSpeedChars
 	return visible
+}
+
+func quickHelpPanelContents() string {
+	return `[default:black]  KEYS   ^h back
+  tab view      esc clear
+  ^h help       q quit
+  ^p purge      ^g config
+  ^s splat      ^k json
+  x expert      X ticker
+  f/F freeze    [] mini
+  <> grace      {} flux
+  ^left/^right  push
+  ^up/^down     scale
+  ^m add top
+  ^b add above Bots
+  ^n add below Bots
+  ^d delete/disable
+  U/D move matcher
+
+  MOUSE
+  ticker facts
+  row select
+  spark inspect
+  list select
+  ^click detail`
 }
 
 // if space were an issue, I'd centralize these, otherwise, dedicated builders save object creation

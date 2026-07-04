@@ -161,9 +161,12 @@ func updateDisplay() {
 		PattyGraph.overallMin, _, PattyGraph.overallMax = PattyGraph.minAvgMaxHistoryAcrossMatchers()
 	}
 
-	if showMetricsPanelContents {
+	switch bottomPanelCurrent {
+	case bottomPanelHelp:
+		PattyGraphBuilderComplex.matcherBuilder.WriteString(quickHelpPanelContents())
+	case bottomPanelFactoids:
 		PattyGraphBuilderComplex.matcherBuilder.WriteString(metricPanelContents())
-	} else {
+	default:
 		for _, matcherFacade := range PattyGraph.matchers {
 			matcher := matcherFacade.asMatcher()
 			if matcher != nil {
@@ -341,7 +344,7 @@ func setUIHook() {
 				// below the spark graph. One of the four columns should take "focus" and translate the click to a
 				// selection. Interesting columns only look for/print the selectionKey if they have focus
 				if x <= botsDisplayWidth {
-					if !showMetricsPanelContents {
+					if bottomPanelCurrent == bottomPanelMatchers {
 						// MATCHERS Column
 						offset, _ := PattyGraph.botMatchesView.GetScrollOffset()
 						index := y - PattyGraph.sparkPanelHeight() + offset
@@ -524,6 +527,9 @@ func setUIHook() {
 		case tcell.KeyCtrlF:
 			doRandom = !doRandom
 			//firstColorWins = !firstColorWins
+			return nil
+		case tcell.KeyCtrlH:
+			toggleHelpPanel()
 			return nil
 		case tcell.KeyCtrlP:
 			// Purge! Clear all PeakWords!

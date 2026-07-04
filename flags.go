@@ -298,6 +298,7 @@ Keyboard Shortcuts:
    ctrl-b     Add selected entry as matcher (above Bots)
    ctrl-s     Save screen to <save-dir>/pattySplat_<date>_<time>_<pid>.txt
    ctrl-g     Save config to <save-dir>/pattyGraph_<date>_<time>_<pid>.conf
+   ctrl-h     Toggle quick help panel
    ctrl-d     Delete selected matcher (or disable Bots bot spawning)
    ctrl-k     Toggle creation of <save-dir>/sparkgraph.json 
    ctrl-f     Toggle random fact stream source
