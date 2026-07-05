@@ -16,104 +16,127 @@ import (
 	"time"
 )
 
-// factoids.go contains PattyGraph's newest and most experimental observation code.
+// factoid.go is PattyGraph's observation catalog.
 //
-// Expect this file to be more active and less settled than the core ingestion,
-// matcher, and display paths.
-
-// The factoid system is where new live-traffic observations are being prototyped as well as
-// expected and established factoids.
-// Factiods feed the crawler bits of information about either how pattyGraph is running or how the
-// matchers are matching live-traffic as it happens. Its meant to be a somewhat random status crawler
-// that is logged that can provide some historical metadata and data about execution. When working on
-// pattyGraph bugs, this ends up being a convenient tool display.
-
+// Factoids are not only ticker text. Each named factoid is also a reverse map
+// from visible runtime language back to the implementation that produced it.
+// Stable names matter because --help facts, ticker output, sidecar summaries,
+// and debugging conversations can all use those names as handles into the code.
+//
+// Expect this file to stay broader and more experimental than the core ingestion
+// and matcher paths: new observations often start here before they prove whether
+// they deserve a larger UI surface or a dedicated document.
 var factoidByName = map[string]*Factoid{}
 
 type FactoidFunc func(args []string) string
+type FactoidSchedule func(cycle int, lastSeen int, shown bool) bool
+
+// Factoid describes one named observation PattyGraph can surface. Condition
+// controls when the observation is eligible; Generate reads live process state
+// and returns already-marked-up display text.
 type Factoid struct {
 	FID         int
 	Name        string
 	Generate    FactoidFunc
-	Condition   func(cycle int, lastSeen int, shown bool) bool
-	probability int // also used as a ranking function
+	Condition   FactoidSchedule
+	probability int // schedule percentage and factoid-history inclusion rank
 	LastSeen    int
 	Shown       bool
 	cache       string
 	args        []string
 }
 
-func CycleMod(mod, offset int, f FactoidFunc) *Factoid {
-	return &Factoid{
-		Generate: f,
-		Condition: func(cycle, _ int, _ bool) bool {
-			return (cycle-offset)%mod == 0
-		},
-	}
-}
-func Random(percent int, f FactoidFunc) *Factoid {
+// Scheduled is the single constructor for factoids. The named wrappers below
+// preserve the compact registration style while making the scheduling policy
+// explicit and reusable. probability is intentionally retained as both the
+// schedule percentage and the rank used when deciding whether a shown factoid is
+// important enough for the factoid history panel.
+func Scheduled(probability int, schedule FactoidSchedule, f FactoidFunc) *Factoid {
 	return &Factoid{
 		Generate:    f,
-		probability: percent,
-		Condition: func(cycle, lastSeen int, _ bool) bool {
-			if lastSeen > 0 && cycle-lastSeen < 10 {
-				return false
-			}
-			if percent <= 0 {
-				return false
-			}
-			if percent >= 100 {
-				return true
-			}
-			return rand.Intn(100) < percent
-		},
+		probability: probability,
+		Condition:   schedule,
 	}
 }
 
-// phony but Random waits 10 entries before going again and this >= 1
-func Repeating(percent int, f FactoidFunc) *Factoid {
-	return &Factoid{
-		Generate:    f,
-		probability: percent,
-		Condition: func(cycle, lastSeen int, _ bool) bool {
-			if lastSeen > 0 && cycle-lastSeen <= 1 {
-				return false
-			}
-			if percent <= 0 {
-				return false
-			}
-			if percent >= 100 {
-				return true
-			}
-			return rand.Intn(100) < percent
-		},
+func CycleSchedule(mod, offset int) FactoidSchedule {
+	return func(cycle, _ int, _ bool) bool {
+		return (cycle-offset)%mod == 0
 	}
+}
+
+func RandomSchedule(percent int) FactoidSchedule {
+	return func(cycle, lastSeen int, _ bool) bool {
+		if lastSeen > 0 && cycle-lastSeen < 10 {
+			return false
+		}
+		if percent <= 0 {
+			return false
+		}
+		if percent >= 100 {
+			return true
+		}
+		return rand.Intn(100) < percent
+	}
+}
+
+func RepeatingSchedule(percent int) FactoidSchedule {
+	return func(cycle, lastSeen int, _ bool) bool {
+		if lastSeen > 0 && cycle-lastSeen <= 1 {
+			return false
+		}
+		if percent <= 0 {
+			return false
+		}
+		if percent >= 100 {
+			return true
+		}
+		return rand.Intn(100) < percent
+	}
+}
+
+func OnceSchedule() FactoidSchedule {
+	return func(_ int, _ int, shown bool) bool {
+		return !shown
+	}
+}
+
+func EverySchedule(n int) FactoidSchedule {
+	return func(cycle, lastSeen int, _ bool) bool {
+		return (cycle - lastSeen) >= n
+	}
+}
+
+func AlwaysSchedule() FactoidSchedule {
+	return func(_, _ int, _ bool) bool {
+		return true
+	}
+}
+
+func CycleMod(mod, offset int, f FactoidFunc) *Factoid {
+	return Scheduled(0, CycleSchedule(mod, offset), f)
+}
+
+func Random(percent int, f FactoidFunc) *Factoid {
+	return Scheduled(percent, RandomSchedule(percent), f)
+}
+
+// Repeating has a deliberately shorter cooldown than Random so operator-facing
+// forced/background observations can recur without waiting ten ticker cycles.
+func Repeating(percent int, f FactoidFunc) *Factoid {
+	return Scheduled(percent, RepeatingSchedule(percent), f)
 }
 
 func Once(f FactoidFunc) *Factoid {
-	return &Factoid{
-		Generate:    f,
-		probability: 100,
-		Condition:   func(cycle, _ int, shown bool) bool { return !shown },
-	}
+	return Scheduled(100, OnceSchedule(), f)
 }
 
 func Every(n int, f FactoidFunc) *Factoid {
-	return &Factoid{
-		Generate:    f,
-		probability: 100,
-		Condition: func(cycle, lastSeen int, _ bool) bool {
-			return (cycle - lastSeen) >= n
-		},
-	}
+	return Scheduled(100, EverySchedule(n), f)
 }
 
 func Always(f FactoidFunc) *Factoid {
-	return &Factoid{
-		Generate:    f,
-		probability: 100,
-		Condition:   func(_, _ int, _ bool) bool { return true },
-	}
+	return Scheduled(100, AlwaysSchedule(), f)
 }
 
 type FactoidGenerator struct {
@@ -122,6 +145,8 @@ type FactoidGenerator struct {
 	cycle  int
 }
 
+// Add registers a factoid under a stable dotted name. That name is the bridge
+// between what an operator sees and where the observation lives in source.
 func (g *FactoidGenerator) Add(f *Factoid, name ...string) {
 	f.FID = len(g.facts)
 	var key string
@@ -150,6 +175,9 @@ func (g *FactoidGenerator) NextBackground() (string, int, string) {
 	return g.next(false)
 }
 
+// next picks the next eligible observation for the ticker/background stream.
+// Forced factoids are used for direct operator feedback; random/cyclic factoids
+// keep the ticker from becoming a fixed wall of status text.
 func (g *FactoidGenerator) next(includeForced bool) (string, int, string) {
 
 	if includeForced && len(g.forced) > 0 {
@@ -215,6 +243,9 @@ const defaultTickerBg = "[:#101010]"
 
 var matcherMarchCount = 0
 
+// NewFactoidGenerator is the main observation catalog. Keep registrations close
+// to the state they describe when practical, but prefer stable factoid names over
+// clever grouping: the names are useful external handles.
 func NewFactoidGenerator() *FactoidGenerator {
 	g := &FactoidGenerator{}
 
@@ -370,7 +401,7 @@ func NewFactoidGenerator() *FactoidGenerator {
 			fmt.Fprintf(&b, toolFmt("%d×%s"), entries[i].tokens, formatCountsUint64(entries[i].count))
 		}
 		return b.String()
-	}), "metrics", "tokenBands")
+	}), "metrics", "UABands")
 
 	g.Add(Random(10, func(_ []string) string {
 		lines := PattyGraph.intervalLines
@@ -394,6 +425,13 @@ func NewFactoidGenerator() *FactoidGenerator {
 	g.Add(Random(3, func(_ []string) string {
 		return fmt.Sprintf(internalFmt("fluxDepth:%d"), fluxDepth)
 	}), "settings", "flux")
+	g.Add(Random(3, func(_ []string) string {
+		return fmt.Sprintf(toolFmt("Pressure p:%d g:%d s:%.1f f:%d"),
+			pattyPushFactor,
+			pattyGracePeriod,
+			pattyScaleFactor,
+			fluxDepth)
+	}), "settings", "pressure")
 	g.Add(Random(4, func(_ []string) string {
 		c := AutobotColors[colorIndex+1]
 		return fmt.Sprintf(wrapFmt("Next Color:%s", c), c[1:len(c)-1])
@@ -521,6 +559,12 @@ func NewFactoidGenerator() *FactoidGenerator {
 		}
 		return fmt.Sprintf(toolFmt("Log size:%s"), v)
 	}), "log", "size")
+	g.Add(Random(3, func(_ []string) string {
+		if generateSidecarJSONL {
+			return fmt.Sprintf(toolFmt("Sidecar:on schema:%d"), SidecarSchemaVersion)
+		}
+		return toolFmt("Sidecar:off")
+	}), "sidecar", "status")
 	//g.Add(Random(5, func(_ []string) string {
 	//	marked := PattyGraph.intervalLines - PattyGraph.unmarked
 	//	total := PattyGraph.intervalLines
@@ -1092,6 +1136,10 @@ func tipText(tip string) string {
 	return "[blue]Tip:[default] " + tip
 }
 
+// Bottom-panel modes share the lower-left TUI surface between matcher detail,
+// factoid history, and quick help. The selected ticker background follows the
+// factoid mode even while quick help is temporarily shown, so ctrl-h can restore
+// the previous operator context.
 type bottomPanelMode int
 
 const (
@@ -1157,12 +1205,14 @@ func currentTickerText() string {
 	return visible
 }
 
+// quickHelpPanelContents is intentionally terse. It is an in-TUI memory aid, not
+// a replacement for --help.
 func quickHelpPanelContents() string {
 	return `[default:black]  KEYS   ^h back
   tab view      esc clear
   ^h help       q quit
   ^p purge      ^g config
-  ^s splat      ^k json
+  ^s splat
   x expert      X ticker
   f/F freeze    [] mini
   <> grace      {} flux
@@ -1182,7 +1232,7 @@ func quickHelpPanelContents() string {
   ^click detail`
 }
 
-// if space were an issue, I'd centralize these, otherwise, dedicated builders save object creation
+// Factoid panel rendering reuses this builder because the panel is redrawn often.
 var panelBuilder = strings.Builder{}
 
 func metricPanelContents() string {

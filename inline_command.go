@@ -640,6 +640,9 @@ func writeConfig(w io.Writer) {
 	if PattyGraph.pattyConfig.saveDir != "" {
 		io.WriteString(w, fmt.Sprintf(InlinePreamble+" save-dir '%s'\n", PattyGraph.pattyConfig.saveDirOriginal))
 	}
+	if PattyGraph.pattyConfig.jsonFileOriginal != "" {
+		io.WriteString(w, fmt.Sprintf(InlinePreamble+" json-file '%s'\n", PattyGraph.pattyConfig.jsonFileOriginal))
+	}
 	if pattyPushFactor != pattyPushFactorDefault {
 		io.WriteString(w, fmt.Sprintf(InlinePreamble+" push %d\n", pattyPushFactor))
 	}
@@ -705,10 +708,11 @@ func SetFlagByName(key string, value string) bool {
 	switch key {
 	case "json":
 		if value == "on" {
-			generateJsonSparks = true
+			generateSidecarJSONL = true
 		} else {
-			generateJsonSparks = false
+			generateSidecarJSONL = PattyGraph.pattyConfig.jsonFile != ""
 		}
+		return true
 	case "control":
 		enableControlFile = parseControlEnabled(value)
 		return true
@@ -750,8 +754,11 @@ func SetFlagByName(key string, value string) bool {
 		machineDisplayName = value
 		return true
 	case "save-dir":
-		PattyGraph.pattyConfig.saveDirOriginal = value
-		PattyGraph.pattyConfig.saveDir = expandUser(value)
+		PattyGraph.pattyConfig.setSaveDir(value)
+		return true
+	case "json-file":
+		PattyGraph.pattyConfig.setJSONFile(value)
+		generateSidecarJSONL = PattyGraph.pattyConfig.jsonFile != ""
 		return true
 	case "color-index":
 		if newIndex, er := strconv.Atoi(value); er == nil {

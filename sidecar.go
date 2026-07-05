@@ -362,6 +362,9 @@ func (m *Monitor) SidecarSessionStart() SidecarSessionStart {
 }
 
 func (m *Monitor) SidecarDefaultPath() string {
+	if m != nil && m.pattyConfig != nil && m.pattyConfig.jsonFile != "" {
+		return m.pattyConfig.jsonFile
+	}
 	if m != nil && m.pattyConfig != nil && m.pattyConfig.saveDir != "" {
 		return filepath.Join(m.pattyConfig.saveDir, sidecarSessionFilename())
 	}
@@ -369,7 +372,20 @@ func (m *Monitor) SidecarDefaultPath() string {
 }
 
 func (m *Monitor) WriteSidecarSessionStartJSONL(path string) error {
+	if path == "" && m != nil && m.pattyConfig != nil && m.pattyConfig.jsonFile != "" {
+		if err := truncateSidecarJSONL(m.pattyConfig.jsonFile); err != nil {
+			return err
+		}
+	}
 	return m.writeSidecarEventJSONL(m.SidecarSessionStart(), path)
+}
+
+func truncateSidecarJSONL(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func (m *Monitor) SidecarControlCommand(command string, source string, result InlineCommandResult) SidecarControlCommand {
@@ -884,6 +900,7 @@ that can be tailed, replayed, or used to choose targeted raw-log searches.
 Enable JSONL output from the CLI:
   pattyGraph -j 
   pattyGraph --json
+  pattyGraph --json-file current.jsonl
 
 Recommended quick AI startup pattern to start and read the last 10M of log file:
   pattyGraph --json --read 10 --config splats/pattyGraph.conf /path/to/access.log
@@ -893,12 +910,20 @@ The startup replay pushes are also written to the pattyLog file, so a reader
 gets immediate context before monitoring the live stream. Smaller read values
 keep startup output bounded while still showing recent traffic shape.
 
+Use --json-file to write a stable, specific PattyLog file instead of the default
+pattyLog_<date>_<time>_<pid>.jsonl session filename. Relative paths are created
+relative to <save-dir> when save-dir is configured; otherwise they use the
+current working directory. A configured json-file is created/truncated at
+session start.
+
 Default output path:
   <save-dir>/pattyLog_<date>_<time>_<pid>.jsonl
 
 If save-dir is not configured, the file is written in the current directory.
-Each PattyGraph process gets a new pattyLog filename. Existing pattyLog files are
-not cleared or appended across process sessions.
+Without --json-file, each PattyGraph process gets a new pattyLog filename.
+Existing timestamped pattyLog files are not cleared or appended across process
+sessions. With --json-file, the configured file is created/truncated at session
+start and then appended for the rest of that session.
 
 JSONL Record types:
   session_start

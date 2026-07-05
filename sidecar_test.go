@@ -190,6 +190,41 @@ func TestSidecarSessionStartIncludesControlFileMetadata(t *testing.T) {
 	}
 }
 
+func TestSidecarDefaultPathUsesConfiguredJSONFile(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.pattyConfig.setSaveDir("/tmp/patty")
+	PattyGraph.pattyConfig.setJSONFile("current.jsonl")
+
+	if got, want := PattyGraph.SidecarDefaultPath(), "/tmp/patty/current.jsonl"; got != want {
+		t.Fatalf("SidecarDefaultPath = %q, want %q", got, want)
+	}
+}
+
+func TestSidecarSessionStartTruncatesConfiguredJSONFile(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	dir := t.TempDir()
+	PattyGraph.pattyConfig.setSaveDir(dir)
+	PattyGraph.pattyConfig.setJSONFile("current.jsonl")
+
+	if err := PattyGraph.WriteSidecarSessionStartJSONL(""); err != nil {
+		t.Fatalf("first WriteSidecarSessionStartJSONL: %v", err)
+	}
+	if err := PattyGraph.WriteSidecarJSONL(PattyGraph.SidecarSnapshotBeforePush(), ""); err != nil {
+		t.Fatalf("WriteSidecarJSONL: %v", err)
+	}
+	if err := PattyGraph.WriteSidecarSessionStartJSONL(""); err != nil {
+		t.Fatalf("second WriteSidecarSessionStartJSONL: %v", err)
+	}
+
+	data, err := os.ReadFile(PattyGraph.SidecarDefaultPath())
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if lines := strings.Count(string(data), "\n"); lines != 1 {
+		t.Fatalf("line count after truncate = %d, want 1; data=%s", lines, data)
+	}
+}
+
 func TestSidecarControlCommandIncludesControlFileMetadata(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	enableControlFile = true

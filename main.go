@@ -41,7 +41,6 @@ var machineDisplayName string
 
 var forceZeroStart bool
 var expertMode bool
-var generateJsonSparks bool
 var generateSidecarJSONL bool
 var enableControlFile bool
 
@@ -140,10 +139,11 @@ func enforceCliFlags() {
 			expertMode = f.Value.String() == "true"
 		case "zero":
 			forceZeroStart = f.Value.String() == "true"
-		case "sparkout":
-			generateJsonSparks = f.Value.String() == "true"
 		case "json":
 			generateSidecarJSONL = f.Value.String() == "true"
+		case "json-file":
+			PattyGraph.pattyConfig.setJSONFile(f.Value.String())
+			generateSidecarJSONL = PattyGraph.pattyConfig.jsonFile != ""
 		case "control":
 			enableControlFile = f.Value.String() == "true"
 		case "color-index":
@@ -153,10 +153,12 @@ func enforceCliFlags() {
 				pushFactNow("settings.colorIndex", nil)
 			}
 		case "save-dir":
-			PattyGraph.pattyConfig.saveDirOriginal = f.Value.String()
-			PattyGraph.pattyConfig.saveDir = expandUser(f.Value.String())
+			PattyGraph.pattyConfig.setSaveDir(f.Value.String())
 		}
 	})
+	if PattyGraph.pattyConfig.jsonFile != "" {
+		generateSidecarJSONL = true
+	}
 }
 func dumpFacts() {
 	// Collect and sort fact names

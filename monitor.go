@@ -273,16 +273,18 @@ func push() {
 
 	// inject new matchers here if needed
 	if !PattyGraph.botsMatcher.disableAutoAdd {
+		botsIndex = botsMatcherIndex()
+		botsWon := PattyGraph.botsMatcher.botsWonCompetitiveLane()
 		PattyGraph.botsMatcher.migrateBots(avg)
 
 		// if we're first started, try to inject up to two more
-		if PattyGraph.intervalsCompleted == 0 {
+		if botsWon && PattyGraph.intervalsCompleted == 0 {
 			botMin := avg
 			if botMin == 0 { // happens at start
 				botMin = float64(PattyGraph.botsMatcher.getCount() / 4)
 			}
-			PattyGraph.botsMatcher.migrateBots(botMin)
-			PattyGraph.botsMatcher.migrateBots(botMin)
+			PattyGraph.botsMatcher.migrateTopBot(botMin)
+			PattyGraph.botsMatcher.migrateTopBot(botMin)
 		}
 	}
 
@@ -293,9 +295,6 @@ func push() {
 	// check if any one ip is exceeding a max lines highwater mark
 	if PattyGraph.intervalsCompleted >= pattyGracePeriod {
 		PattyGraph.ipsMatcher.migrateIps()
-	}
-	if generateJsonSparks && PattyGraph.layout != nil {
-		PattyGraph.writeSparklineJSON()
 	}
 	botsIndex = botsMatcherIndex() // make sure its always in check, used to be done per-logline!
 	// reset lines counted this interval

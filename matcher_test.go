@@ -274,3 +274,85 @@ func TestBotsMigrationPromotesTopBotBeforeBots(t *testing.T) {
 		t.Fatalf("Bots intervalCount after migrated matcher wins = %d, want 0", PattyGraph.botsMatcher.intervalCount)
 	}
 }
+
+func TestPushAutoMigratesBotsWinnerDuringStartup(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	line := standardPipelineLine(
+		"192.0.2.10",
+		"/robots.txt",
+		"200",
+		"321",
+		"-",
+		"Mozilla/5.0 Googlebot",
+	)
+	match(line)
+
+	push()
+	botsIndex = botsMatcherIndex()
+
+	if botsMigrated != 1 {
+		t.Fatalf("botsMigrated = %d, want 1", botsMigrated)
+	}
+	if botsIndex != 1 {
+		t.Fatalf("botsIndex = %d, want 1 after startup migration", botsIndex)
+	}
+	migrated := PattyGraph.matchers[0].asMatcher()
+	if migrated == nil || migrated.matcherName() != "Googlebot" {
+		t.Fatalf("first matcher = %v, want Googlebot matcher", PattyGraph.matchers[0].matcherName())
+	}
+	if migrated.lastIntervalCount != 1 {
+		t.Fatalf("migrated lastIntervalCount = %d, want transferred pushed count 1", migrated.lastIntervalCount)
+	}
+	if migrated.intervalCount != 0 {
+		t.Fatalf("migrated intervalCount after push = %d, want 0", migrated.intervalCount)
+	}
+}
+
+func TestStartupPushCanAutoMigrateMultipleBotGroups(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.botsMatcher.intervalCount = 19
+	PattyGraph.botsMatcher.matchCountsMap["Googlebot"] = 10
+	PattyGraph.botsMatcher.matchCountsMap["bingbot"] = 8
+	PattyGraph.botsMatcher.matchCountsMap["Applebot"] = 1
+
+	push()
+	botsIndex = botsMatcherIndex()
+
+	if botsMigrated != 2 {
+		t.Fatalf("botsMigrated = %d, want 2", botsMigrated)
+	}
+	if botsIndex != 2 {
+		t.Fatalf("botsIndex = %d, want 2 after two startup migrations", botsIndex)
+	}
+	if got := PattyGraph.matchers[0].matcherName(); got != "Googlebot" {
+		t.Fatalf("first matcher = %q, want Googlebot", got)
+	}
+	if got := PattyGraph.matchers[1].matcherName(); got != "bingbot" {
+		t.Fatalf("second matcher = %q, want bingbot", got)
+	}
+	if matcherNameExists("Applebot") {
+		t.Fatal("Applebot should not migrate below startup threshold")
+	}
+	if PattyGraph.botsMatcher.lastIntervalCount != 1 {
+		t.Fatalf("Bots lastIntervalCount = %d, want remaining Applebot count 1", PattyGraph.botsMatcher.lastIntervalCount)
+	}
+}
+
+func TestBotsMigrationSkipsWhenHigherCompetingMatcherWins(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	winner := SimplePredicateMatcher("winner", []string{"winner"})
+	winner.intervalCount = 3
+	PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, winner)
+	botsIndex = botsMatcherIndex()
+
+	PattyGraph.botsMatcher.intervalCount = 2
+	PattyGraph.botsMatcher.matchCountsMap["Googlebot"] = 2
+	PattyGraph.botsMatcher.migrateBots(0)
+
+	if botsMigrated != 0 {
+		t.Fatalf("botsMigrated = %d, want 0", botsMigrated)
+	}
+	if matcherNameExists("Googlebot") {
+		t.Fatal("Googlebot matcher was migrated even though a higher competing matcher won")
+	}
+}

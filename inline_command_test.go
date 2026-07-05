@@ -100,6 +100,45 @@ func TestInlineAddRejectsDuplicateMatcherName(t *testing.T) {
 	}
 }
 
+func TestInlineJSONFileImpliesJSONOutput(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	generateSidecarJSONL = false
+	PattyGraph.pattyConfig.setSaveDir("/tmp/patty")
+
+	result := invokeInlineCommand("!!! json-file current.jsonl")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want applied: %#v", result.Status, result.Result)
+	}
+	if !generateSidecarJSONL {
+		t.Fatal("generateSidecarJSONL = false, want true")
+	}
+	if got, want := PattyGraph.pattyConfig.jsonFile, "/tmp/patty/current.jsonl"; got != want {
+		t.Fatalf("jsonFile = %q, want %q", got, want)
+	}
+}
+
+func TestInlineJSONTogglesSidecarOutput(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	generateSidecarJSONL = false
+
+	invokeInlineCommand("!!! json on")
+	if !generateSidecarJSONL {
+		t.Fatal("json on did not enable generateSidecarJSONL")
+	}
+
+	invokeInlineCommand("!!! json off")
+	if generateSidecarJSONL {
+		t.Fatal("json off did not disable generateSidecarJSONL")
+	}
+
+	invokeInlineCommand("!!! json-file current.jsonl")
+	invokeInlineCommand("!!! json off")
+	if !generateSidecarJSONL {
+		t.Fatal("json off disabled output implied by json-file")
+	}
+}
+
 func TestInlineAddRejectsDuplicateMatcherNameAcrossPlacementPrefixes(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 

@@ -128,23 +128,26 @@ var botsMigrated = 0
 
 // Bot migration depends on matcher ordering and interval count transfer; keep changes focused and covered by tests.
 func (m *Matcher) migrateBots(threshold float64) {
-	var topMatcher MatcherFacade
 	botsIndex = botsMatcherIndex()
-	maxSiblingCount := 0
-	if threshold >= 0 {
-		// Iterate over all matchers to find the one with the highest intervalCount
-		for i, matcher := range PattyGraph.matchers {
-			// Assuming Matcher has a field `intervalCount` which we can access directly
-			if i < botsIndex && matcher.getCount() > maxSiblingCount {
-				maxSiblingCount = matcher.getCount()
-				topMatcher = matcher
-			}
-		}
-		// Only migrate a bot if we're in the top spot
-		if topMatcher != m {
-			return
+	if threshold >= 0 && !m.botsWonCompetitiveLane() {
+		return
+	}
+	m.migrateTopBot(threshold)
+}
+
+func (m *Matcher) botsWonCompetitiveLane() bool {
+	// Bots may fork only when it wins the competitive lane for this interval.
+	// During startup Bots is often at index 0, so "no higher competing row beat
+	// Bots" is a win.
+	for i := 0; i < botsIndex; i++ {
+		if PattyGraph.matchers[i].getCount() >= m.intervalCount {
+			return false
 		}
 	}
+	return true
+}
+
+func (m *Matcher) migrateTopBot(threshold float64) {
 	topCount := 0
 	var topBot string
 	for bot, count := range m.matchCountsMap {
@@ -154,6 +157,9 @@ func (m *Matcher) migrateBots(threshold float64) {
 		}
 	}
 	if topCount == 0 {
+		return
+	}
+	if threshold >= 0 && float64(topCount) < threshold {
 		return
 	}
 	if matcherNameExists(topBot) {

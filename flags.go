@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/pflag"
@@ -39,8 +40,8 @@ var flags = []flagInfo{
 	{"flux", "f", DefaultFluxDepth, "Flux is the history depth used for interesting word ranking.", "int"},
 	{"read", "r", DefaultMBToRead, "Number of MB back of logfile to read upon startup", "int"},
 	{"color-index", "l", 0, "Advance the color assignment index for a different look", "int"},
-	//{"sparkout", "k", false, "Save sparkgraph json data to <save-dir>/sparkgraph.json once per interval", "bool"},
 	{"json", "j", false, "Write PattyLog JSONL interval data to <save-dir>/pattyLog_<date>_<time>_<pid>.jsonl", "bool"},
+	{"json-file", "", "", "Write PattyLog JSONL to a specific file under <save-dir>; implies --json", "string"},
 	{"control", "C", false, "Read inline commands from pattyControl.log in save-dir/current dir", "bool"},
 	{"zero", "0", false, "Force cycle count = 0 at start", "bool"},
 	//{"expert", "x", false, "Start with expert display on", "bool"},
@@ -49,12 +50,38 @@ var flags = []flagInfo{
 }
 
 type MonitorConfig struct {
-	filePath        string
-	excludeRequest  bool
-	saveDir         string // expanded save directory, e.g. /home/user/patty
-	saveDirOriginal string // user-provided save directory, e.g. ~/patty
-	builtinConfFile string
-	mbToRead        int
+	filePath         string
+	excludeRequest   bool
+	saveDir          string // expanded save directory, e.g. /home/user/patty
+	saveDirOriginal  string // user-provided save directory, e.g. ~/patty
+	jsonFile         string // resolved PattyLog JSONL output path
+	jsonFileOriginal string // user-provided PattyLog JSONL output path
+	builtinConfFile  string
+	mbToRead         int
+}
+
+func (c *MonitorConfig) setSaveDir(value string) {
+	c.saveDirOriginal = value
+	c.saveDir = expandUser(value)
+	c.refreshJSONFilePath()
+}
+
+func (c *MonitorConfig) setJSONFile(value string) {
+	c.jsonFileOriginal = value
+	c.refreshJSONFilePath()
+}
+
+func (c *MonitorConfig) refreshJSONFilePath() {
+	if c.jsonFileOriginal == "" {
+		c.jsonFile = ""
+		return
+	}
+	expanded := expandUser(c.jsonFileOriginal)
+	if filepath.IsAbs(expanded) || c.saveDir == "" {
+		c.jsonFile = expanded
+		return
+	}
+	c.jsonFile = filepath.Join(c.saveDir, expanded)
 }
 
 func printVersion() string {
@@ -133,9 +160,8 @@ func parseArgs() *MonitorConfig {
 
 		categories := map[string][]string{
 			"General Settings": {"push", "scale", "grace", "flux"},
-			//"Configuration":    {"config", "save-dir", "sparkout", "json", "control"},
 			//"Customization":    {"title", "color-index", "read", "expert", "zero"},
-			"Configuration": {"config", "save-dir", "json", "control"},
+			"Configuration": {"config", "save-dir", "json", "json-file", "control"},
 			"Customization": {"title", "color-index", "read", "zero"},
 			"Help":          {"help"},
 		}
@@ -164,7 +190,11 @@ func parseArgs() *MonitorConfig {
 						if typeDescription != "" {
 							typeDescription = fmt.Sprintf("<%s>", typeDescription)
 						}
-						fmt.Printf("  -%s, --%s %s%s\n", f.Short, f.Name, typeDescription, defaultText)
+						flagPrefix := fmt.Sprintf("  -%s, --%s", f.Short, f.Name)
+						if f.Short == "" {
+							flagPrefix = fmt.Sprintf("      --%s", f.Name)
+						}
+						fmt.Printf("%s %s%s\n", flagPrefix, typeDescription, defaultText)
 						fmt.Printf("        %s\n", f.Description)
 					}
 				}
@@ -190,8 +220,8 @@ func parseArgs() *MonitorConfig {
 	mConf.builtinConfFile = *stringMap["config"]
 
 	// Each type was added to the corresponding map for retrieval here
-	mConf.saveDirOriginal = *stringMap["save-dir"]
-	mConf.saveDir = expandUser(*stringMap["save-dir"])
+	mConf.setSaveDir(*stringMap["save-dir"])
+	mConf.setJSONFile(*stringMap["json-file"])
 	mConf.mbToRead = *intMap["read"]
 
 	// legacy: globals that were getting set at parse time
@@ -201,8 +231,7 @@ func parseArgs() *MonitorConfig {
 	pattyScaleFactor = *floatMap["scale"]
 	forceZeroStart = *boolMap["zero"]
 	//expertMode = *boolMap["expert"]
-	//generateJsonSparks = *boolMap["sparkout"]
-	generateSidecarJSONL = *boolMap["json"]
+	generateSidecarJSONL = *boolMap["json"] || mConf.jsonFile != ""
 	enableControlFile = *boolMap["control"]
 	colorIndex = *intMap["color-index"] // from config
 	machineDisplayName = *stringMap["title"]
@@ -300,7 +329,6 @@ Keyboard Shortcuts:
    ctrl-g     Save config to <save-dir>/pattyGraph_<date>_<time>_<pid>.conf
    ctrl-h     Toggle quick help panel
    ctrl-d     Delete selected matcher (or disable Bots bot spawning)
-   ctrl-k     Toggle creation of <save-dir>/sparkgraph.json 
    ctrl-f     Toggle random fact stream source
    U/D        Move selected matcher Up/Down 
    tab        Increment secondary information display
@@ -442,6 +470,10 @@ Configuration Settings:
   !!! title <name>
   !!! save-dir <path>
       Set the directory for config and splat output (e.g. ~/splats).
+  !!! json-file <path>
+      Write PattyLog JSONL to a specific file relative to <save-dir>. Implies json on.
+  !!! control <on|off>
+      Enable or disable pattyControl.log command input. Use -C/--control to start with it on.
   !!! color-index <int>
       Index into the color table for Matcher color assignment
 Misc Commands:
@@ -455,13 +487,15 @@ Misc Commands:
       Toggle Ticker operation (same as keyboard 'X') 
   !!! history
       Toggle Factoid History display (same as selecting Ticker) 
+  !!! fact <fact.name>
+      Injects named factoid as the next factoid. See '--help inline'
 Persistence & Export:
   !!! pattySplat
       Save the current screen state to a timestamped file.
   !!! dumpConfig
       Save the current matcher definitions to a new timestamped config file.
   !!! json <on|off>
-      Turn on sparkgraph saves to <save-dir>/sparkgraph.json
+      Turn PattyLog JSONL output on or off.
 
 General:
   - Lines must begin with '!!! '.
@@ -541,19 +575,18 @@ Layout:
 +----------------+---------------+---------------+----------+
 
 Example Expert Overlay (optional top right text overlay):
-  20 3000 80M@/{4:90.120.180}301.5
+  20 3000 80M/{4:90.120.180}301.5
 Value Decomposition:
   20 - Max value seen in competing matchers (i.e. matchers above & including Bots)
   3000 - Max lines seen per interval
   80M - Max bytes served per interval
-  @ - If present, <save-dir>/sparkgraph.json file will be updated on every push
   / - Secondary information indicator
       '-' - PattyFactor
       '/' - Current + Flux Depth of History
       '|' - History Depth
       '\' - Average User-Agent edit difference per IP
       '=' - Mini sparkline sliding window view
-   (Note: For the sliding window, the time scale above the sparkgraph will 
+   (Note: For the sliding window, the time scale above the spark panel will 
           highlight the corresponding tick for the sliding window's relative
           position)
    {4:90.120.180}

@@ -4,13 +4,10 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -535,10 +532,6 @@ func setUIHook() {
 			// Purge! Clear all PeakWords!
 			PattyGraph.purgeAllPeakContent()
 			return nil
-		case tcell.KeyCtrlK:
-			// Purge! Clear all PeakWords!
-			generateJsonSparks = !generateJsonSparks
-			return nil
 		case tcell.KeyCtrlD:
 			if PattyGraph.selectedMatcher == PattyGraph.botsMatcher {
 				toggleBotsMatcher(!PattyGraph.botsMatcher.disableAutoAdd)
@@ -741,7 +734,7 @@ func (m *Monitor) sparkPanelHeight() int {
 		h += 2 // adding two lines for linesource at the end
 	}
 	if m.selectedInterestingMatcher != nil {
-		h += 1 // adding a line for spoofed sparkgraph
+		h += 1 // adding a line for selected interesting sparkline detail
 	}
 	if PattyGraph.showTicker {
 		h += 1 // adding a line for the ticker
@@ -797,12 +790,6 @@ func (mon *Monitor) statusLine() string {
 	}
 	status.WriteString(fmt.Sprintf("%4s", strings.TrimSpace(formatBytes(lastBytesMax))))
 
-	if generateJsonSparks {
-		status.WriteString("@")
-	} else {
-		status.WriteString(" ")
-	}
-
 	status.WriteString(fmt.Sprintf("%2d", fluxDepth))
 
 	status.WriteString(tabGlyph())
@@ -822,62 +809,6 @@ func (mon *Monitor) statusLine() string {
 	return result
 }
 
-type SparklineData struct {
-	Name  string `json:"name"`
-	X     []int  `json:"x"`
-	Color string `json:"color"`
-}
-
-// strip square brackets and resolve to hex
-func tcellColorToHex(raw string) string {
-	name := strings.Trim(raw, "[]")
-	color := tcell.GetColor(name) // works for both named and #hex values
-
-	r, g, b := color.RGB()
-	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
-}
-
-func (m *Monitor) writeSparklineJSON() {
-	// Build filename using the same pattern as pattySplat
-	path := "sparkgraph.json"
-	if PattyGraph.pattyConfig.saveDir != "" {
-		path = filepath.Join(PattyGraph.pattyConfig.saveDir, "sparkgraph.json")
-	}
-
-	//PattyGraph.mu.RLock()
-	//defer PattyGraph.mu.RUnlock()
-
-	var payload []SparklineData
-	for _, mf := range PattyGraph.matchers {
-		m := mf.asMatcher()
-		if m == nil {
-			continue
-		}
-		payload = append(payload, SparklineData{
-			Name:  m.matcherName(),
-			X:     m.history,
-			Color: tcellColorToHex(m.color),
-		})
-	}
-
-	data := struct {
-		Timestamp  time.Time       `json:"timestamp"`
-		Sparklines []SparklineData `json:"sparklines"`
-	}{
-		Timestamp:  time.Now(),
-		Sparklines: payload,
-	}
-
-	// Write atomically
-	tmp := path + ".tmp"
-	f, err := os.Create(tmp)
-	if err == nil {
-		json.NewEncoder(f).Encode(data)
-		f.Close()
-		os.Rename(tmp, path)
-	}
-}
-
 func colorText(s string, color string) string {
 	var b strings.Builder
 	for _, r := range s {
@@ -892,4 +823,13 @@ func gradientText(s string, colors []string) string {
 		b.WriteString(fmt.Sprintf("[%s]%c", color, r))
 	}
 	return b.String()
+}
+
+// strip square brackets and resolve to hex for sidecar/display metadata
+func tcellColorToHex(raw string) string {
+	name := strings.Trim(raw, "[]")
+	color := tcell.GetColor(name) // works for both named and #hex values
+
+	r, g, b := color.RGB()
+	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
 }

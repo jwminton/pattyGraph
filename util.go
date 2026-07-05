@@ -22,7 +22,7 @@ const (
 	PattyGraphGithubUrl = "https://github.com/jwminton/pattyGraph"
 	PattyGraphName      = "PattyGraph"
 	// NOTE: PattyGraphVersion is used by compile.sh for repackaging labeling
-	PattyGraphVersion = "0.1.5-dev"
+	PattyGraphVersion = "0.1.5"
 )
 
 const (
@@ -981,6 +981,8 @@ func getWrappedFactoid() string {
 		wrappedFact = " [" + PattyOrange + "]•[default] " + newFact
 	}
 
+	// Factoid probability also acts as the panel inclusion rank. Low-frequency
+	// tips can appear in the ticker without filling the persistent factoid list.
 	if ranking >= 5 {
 		// Prepend new fact to the top of the list
 		//newFacts := splitFactoidForWidth(newFact, botsDisplayWidth)
