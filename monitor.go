@@ -486,6 +486,9 @@ func controlFileStartMarker() string {
 }
 
 func controlFilePath() string {
+	if PattyGraph.pattyConfig.controlFile != "" {
+		return PattyGraph.pattyConfig.controlFile
+	}
 	if PattyGraph.pattyConfig.saveDir != "" {
 		return filepath.Join(PattyGraph.pattyConfig.saveDir, "pattyControl.log")
 	}

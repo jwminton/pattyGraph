@@ -565,6 +565,29 @@ func NewFactoidGenerator() *FactoidGenerator {
 		}
 		return toolFmt("Sidecar:off")
 	}), "sidecar", "status")
+	g.Add(Random(3, func(_ []string) string {
+		jsonState := "off"
+		if generateSidecarJSONL {
+			jsonState = "on"
+		}
+		controlState := "off"
+		if enableControlFile {
+			controlState = "on"
+		}
+		saveState := "cwd"
+		if PattyGraph.pattyConfig != nil && PattyGraph.pattyConfig.saveDir != "" {
+			saveState = "dir"
+		}
+		failState := ""
+		if sidecarWriteFailures > 0 {
+			failState = fmt.Sprintf(" fail:%d/%d", sidecarWriteFailures, sidecarWriteFailureLimit)
+		}
+		return fmt.Sprintf(internalFmt("Output json:%s control:%s save:%s%s"),
+			jsonState,
+			controlState,
+			saveState,
+			failState)
+	}), "output", "health")
 	//g.Add(Random(5, func(_ []string) string {
 	//	marked := PattyGraph.intervalLines - PattyGraph.unmarked
 	//	total := PattyGraph.intervalLines

@@ -426,6 +426,22 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 				return result
 			}
 		}
+		if strings.EqualFold(cmd, "control-file") {
+			PattyGraph.pattyConfig.setControlFile(value)
+			if opts.allowCreateSaveDir {
+				enableControlFile = true
+			} else {
+				pushSystemNow("Control file path saved for config")
+			}
+			result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_control_file_config")
+			result.Result["name"] = "control-file"
+			result.Result["value"] = value
+			result.Result["path"] = PattyGraph.pattyConfig.controlFile
+			if !opts.allowCreateSaveDir {
+				result.Result["runtime_effect"] = "next_config_only"
+			}
+			return result
+		}
 		if !SetFlagByName(cmd, value) {
 			log.Printf("Unknown inline command: %s", commandLine)
 			return inlineCommandRejected(cmd, "unknown", "unknown inline command")
@@ -695,6 +711,11 @@ func writeConfig(w io.Writer) error {
 			return err
 		}
 	}
+	if PattyGraph.pattyConfig.controlFileOriginal != "" {
+		if err := write(InlinePreamble+" control-file '%s'\n", PattyGraph.pattyConfig.controlFileOriginal); err != nil {
+			return err
+		}
+	}
 	if pattyPushFactor != pattyPushFactorDefault {
 		if err := write(InlinePreamble+" push %d\n", pattyPushFactor); err != nil {
 			return err
@@ -791,6 +812,9 @@ func SetFlagByName(key string, value string) bool {
 		return true
 	case "control":
 		enableControlFile = parseControlEnabled(value)
+		return true
+	case "control-file":
+		PattyGraph.pattyConfig.setControlFile(value)
 		return true
 	case "push":
 		if newPush, er := strconv.Atoi(value); er == nil {

@@ -147,6 +147,9 @@ func enforceCliFlags() {
 			generateSidecarJSONL = PattyGraph.pattyConfig.jsonFile != ""
 		case "control":
 			enableControlFile = f.Value.String() == "true"
+		case "control-file":
+			PattyGraph.pattyConfig.setControlFile(f.Value.String())
+			enableControlFile = PattyGraph.pattyConfig.controlFile != ""
 		case "color-index":
 			value, _ := strconv.Atoi(f.Value.String())
 			if value != colorIndex {
@@ -159,6 +162,9 @@ func enforceCliFlags() {
 	})
 	if PattyGraph.pattyConfig.jsonFile != "" {
 		generateSidecarJSONL = true
+	}
+	if PattyGraph.pattyConfig.controlFile != "" {
+		enableControlFile = true
 	}
 }
 func dumpFacts() {

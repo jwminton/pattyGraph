@@ -307,6 +307,48 @@ func TestInlineControlCommandTogglesControlFileProcessing(t *testing.T) {
 	}
 }
 
+func TestInlineControlFileRuntimeUpdatesConfigOnly(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	enableControlFile = false
+	PattyGraph.pattyConfig.setSaveDir("/tmp/patty")
+
+	result := invokeInlineCommand("!!! control-file current.control")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q", result.Status, InlineCommandStatusApplied)
+	}
+	if enableControlFile {
+		t.Fatal("enableControlFile = true after runtime control-file, want unchanged false")
+	}
+	if got, want := PattyGraph.pattyConfig.controlFile, "/tmp/patty/current.control"; got != want {
+		t.Fatalf("controlFile = %q, want %q", got, want)
+	}
+	if result.Result["runtime_effect"] != "next_config_only" {
+		t.Fatalf("runtime_effect = %v, want next_config_only", result.Result["runtime_effect"])
+	}
+}
+
+func TestConfigInlineControlFileImpliesControl(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	enableControlFile = false
+	PattyGraph.pattyConfig.setSaveDir("/tmp/patty")
+
+	result := invokeInlineCommandWithOptions(
+		"!!! control-file current.control",
+		InlineCommandOptions{allowCreateSaveDir: true},
+	)
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q", result.Status, InlineCommandStatusApplied)
+	}
+	if !enableControlFile {
+		t.Fatal("enableControlFile = false after config control-file, want true")
+	}
+	if got, want := PattyGraph.pattyConfig.controlFile, "/tmp/patty/current.control"; got != want {
+		t.Fatalf("controlFile = %q, want %q", got, want)
+	}
+}
+
 func TestInlineSaveDirRejectsMissingDirectoryResult(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	existing := t.TempDir()

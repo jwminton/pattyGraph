@@ -43,6 +43,7 @@ var flags = []flagInfo{
 	{"json", "j", false, "Write PattyLog JSONL interval data to <save-dir>/pattyLog_<date>_<time>_<pid>.jsonl", "bool"},
 	{"json-file", "", "", "Write PattyLog JSONL to a specific file under <save-dir>; implies --json", "string"},
 	{"control", "C", false, "Read inline commands from pattyControl.log in save-dir/current dir", "bool"},
+	{"control-file", "", "", "Read inline commands from a specific file under <save-dir>; implies --control", "string"},
 	{"zero", "0", false, "Force cycle count = 0 at start", "bool"},
 	//{"expert", "x", false, "Start with expert display on", "bool"},
 	{"version", "v", false, "Prints current version and exits", "bool"},
@@ -50,25 +51,33 @@ var flags = []flagInfo{
 }
 
 type MonitorConfig struct {
-	filePath         string
-	excludeRequest   bool
-	saveDir          string // expanded save directory, e.g. /home/user/patty
-	saveDirOriginal  string // user-provided save directory, e.g. ~/patty
-	jsonFile         string // resolved PattyLog JSONL output path
-	jsonFileOriginal string // user-provided PattyLog JSONL output path
-	builtinConfFile  string
-	mbToRead         int
+	filePath            string
+	excludeRequest      bool
+	saveDir             string // expanded save directory, e.g. /home/user/patty
+	saveDirOriginal     string // user-provided save directory, e.g. ~/patty
+	jsonFile            string // resolved PattyLog JSONL output path
+	jsonFileOriginal    string // user-provided PattyLog JSONL output path
+	controlFile         string // resolved control file path
+	controlFileOriginal string // user-provided control file path
+	builtinConfFile     string
+	mbToRead            int
 }
 
 func (c *MonitorConfig) setSaveDir(value string) {
 	c.saveDirOriginal = value
 	c.saveDir = expandUser(value)
 	c.refreshJSONFilePath()
+	c.refreshControlFilePath()
 }
 
 func (c *MonitorConfig) setJSONFile(value string) {
 	c.jsonFileOriginal = value
 	c.refreshJSONFilePath()
+}
+
+func (c *MonitorConfig) setControlFile(value string) {
+	c.controlFileOriginal = value
+	c.refreshControlFilePath()
 }
 
 func (c *MonitorConfig) refreshJSONFilePath() {
@@ -82,6 +91,19 @@ func (c *MonitorConfig) refreshJSONFilePath() {
 		return
 	}
 	c.jsonFile = filepath.Join(c.saveDir, expanded)
+}
+
+func (c *MonitorConfig) refreshControlFilePath() {
+	if c.controlFileOriginal == "" {
+		c.controlFile = ""
+		return
+	}
+	expanded := expandUser(c.controlFileOriginal)
+	if filepath.IsAbs(expanded) || c.saveDir == "" {
+		c.controlFile = expanded
+		return
+	}
+	c.controlFile = filepath.Join(c.saveDir, expanded)
 }
 
 func printVersion() string {
@@ -161,7 +183,7 @@ func parseArgs() *MonitorConfig {
 		categories := map[string][]string{
 			"General Settings": {"push", "scale", "grace", "flux"},
 			//"Customization":    {"title", "color-index", "read", "expert", "zero"},
-			"Configuration": {"config", "save-dir", "json", "json-file", "control"},
+			"Configuration": {"config", "save-dir", "json", "json-file", "control", "control-file"},
 			"Customization": {"title", "color-index", "read", "zero"},
 			"Help":          {"help"},
 		}
@@ -222,6 +244,7 @@ func parseArgs() *MonitorConfig {
 	// Each type was added to the corresponding map for retrieval here
 	mConf.setSaveDir(*stringMap["save-dir"])
 	mConf.setJSONFile(*stringMap["json-file"])
+	mConf.setControlFile(*stringMap["control-file"])
 	mConf.mbToRead = *intMap["read"]
 
 	// legacy: globals that were getting set at parse time
@@ -232,7 +255,7 @@ func parseArgs() *MonitorConfig {
 	forceZeroStart = *boolMap["zero"]
 	//expertMode = *boolMap["expert"]
 	generateSidecarJSONL = *boolMap["json"] || mConf.jsonFile != ""
-	enableControlFile = *boolMap["control"]
+	enableControlFile = *boolMap["control"] || mConf.controlFile != ""
 	colorIndex = *intMap["color-index"] // from config
 	machineDisplayName = *stringMap["title"]
 	machineDisplayName = *stringMap["title"]
@@ -475,6 +498,8 @@ Configuration Settings:
       Write PattyLog JSONL to a specific file relative to <save-dir>. Implies json on.
   !!! control <on|off>
       Enable or disable pattyControl.log command input. Use -C/--control to start with it on.
+  !!! control-file <path>
+      Save a control-file path for generated config. Active control tailer changes require restart.
   !!! color-index <int>
       Index into the color table for Matcher color assignment
 Misc Commands:

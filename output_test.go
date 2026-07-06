@@ -63,6 +63,21 @@ func TestWriteConfigEmitsActiveModeAndColorLines(t *testing.T) {
 	}
 }
 
+func TestWriteConfigEmitsControlFile(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.pattyConfig.setControlFile("current.control")
+
+	var buf bytes.Buffer
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig() error = %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "!!! control-file 'current.control'\n") {
+		t.Fatalf("config did not contain control-file line:\n%s", out)
+	}
+}
+
 func TestWriteConfigEmitsAlertLines(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	invokeInlineCommand("!!! alert errs above 50")

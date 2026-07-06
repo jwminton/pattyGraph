@@ -28,6 +28,17 @@ func TestControlFilePathUsesSaveDirWhenPresent(t *testing.T) {
 	}
 }
 
+func TestControlFilePathUsesConfiguredControlFile(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.pattyConfig.setSaveDir("/tmp/patty")
+	PattyGraph.pattyConfig.setControlFile("current.control")
+
+	want := filepath.Join("/tmp/patty", "current.control")
+	if got := controlFilePath(); got != want {
+		t.Fatalf("controlFilePath() = %q, want %q", got, want)
+	}
+}
+
 func TestEnsureSaveDirCreatesConfiguredDirectory(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	dir := filepath.Join(t.TempDir(), "missing", "nested")
