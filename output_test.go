@@ -18,7 +18,9 @@ func TestWriteConfigEmitsUserMatcherCommandsButNotSystemAdds(t *testing.T) {
 	invokeInlineCommand("!!! add *range-watch --ips 192.0.")
 
 	var buf bytes.Buffer
-	writeConfig(&buf)
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig() error = %v", err)
+	}
 	out := buf.String()
 
 	if !strings.Contains(out, "!!! add googlebot\n") {
@@ -48,7 +50,9 @@ func TestWriteConfigEmitsActiveModeAndColorLines(t *testing.T) {
 	invokeInlineCommand("!!! color googlebot red")
 
 	var buf bytes.Buffer
-	writeConfig(&buf)
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig() error = %v", err)
+	}
 	out := buf.String()
 
 	if !strings.Contains(out, "!!! mode googlebot 2\n") {
@@ -65,7 +69,9 @@ func TestWriteConfigEmitsAlertLines(t *testing.T) {
 	invokeInlineCommand("!!! alert Bots below 1")
 
 	var buf bytes.Buffer
-	writeConfig(&buf)
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig() error = %v", err)
+	}
 	out := buf.String()
 
 	if !strings.Contains(out, "!!! alert errs above 50\n") {
@@ -84,7 +90,9 @@ func TestWriteConfigPreservesAlertCommentsAndReplacesBoundsIndependently(t *test
 	invokeInlineCommand("!!! alert Googlebot above 700 # adjusted after replay")
 
 	var buf bytes.Buffer
-	writeConfig(&buf)
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig() error = %v", err)
+	}
 	out := buf.String()
 
 	if !strings.Contains(out, "!!! alert Googlebot below 1 # disappeared\n") {
@@ -110,7 +118,9 @@ func TestWriteConfigQuotesAlertMatcherNamesWithSpaces(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	writeConfig(&buf)
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig() error = %v", err)
+	}
 	out := buf.String()
 
 	if !strings.Contains(out, `!!! alert "My Bot" above 5`+"\n") {
@@ -136,7 +146,7 @@ func TestPrintToFileStripsColorTags(t *testing.T) {
 	PattyGraph.refsView.SetText("[yellow]Refs[default]")
 	PattyGraph.ipsView.SetText("[purple]Ips[default]")
 
-	if err := PattyGraph.printToFile(); err != nil {
+	if _, err := PattyGraph.printToFile(); err != nil {
 		t.Fatalf("printToFile() error = %v", err)
 	}
 

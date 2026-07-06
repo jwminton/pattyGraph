@@ -79,14 +79,15 @@ func main() {
 
 	PattyGraph.playConfigFile(mConf.builtinConfFile)
 	enforceCliFlags()
+	if err := ensureSaveDir(PattyGraph.pattyConfig); err != nil {
+		log.Fatalf("Failed to create save-dir %s: %v", PattyGraph.pattyConfig.saveDir, err)
+	}
 	startControlFileMonitoring()
 	// Sidecar stream marker: write this before startup replay so AI consumers
 	// can correlate both ghost-run preload intervals and live TUI intervals
 	// under one session_id. The --json CLI flag gates this stream.
 	if generateSidecarJSONL {
-		if err := PattyGraph.WriteSidecarSessionStartJSONL(""); err != nil {
-			log.Printf("sidecar session start write failed: %v", err)
-		}
+		recordSidecarWriteResult("session_start", PattyGraph.WriteSidecarSessionStartJSONL(""))
 	}
 	beforeLoadTime := time.Now()
 	preloadRecentMinutes()
@@ -234,9 +235,7 @@ func preloadRecentMinutes() error {
 			}
 			push() // Push only if NOT the last minute
 			if generateSidecarJSONL {
-				if err := PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""); err != nil {
-					log.Printf("PattyLog preload jsonl write failed: %v", err)
-				}
+				recordSidecarWriteResult("preload interval", PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""))
 			}
 			PattyGraph.writePendingAlertTransitionsJSONL()
 			PattyGraph.clearPendingAlertTransitions()
@@ -254,9 +253,7 @@ func preloadRecentMinutes() error {
 				}
 				push()
 				if generateSidecarJSONL {
-					if err := PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""); err != nil {
-						log.Printf("PattyLog preload jsonl write failed: %v", err)
-					}
+					recordSidecarWriteResult("preload interval", PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""))
 				}
 				PattyGraph.writePendingAlertTransitionsJSONL()
 				PattyGraph.clearPendingAlertTransitions()

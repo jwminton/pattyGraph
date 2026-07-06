@@ -4,6 +4,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,6 +25,38 @@ func TestControlFilePathUsesSaveDirWhenPresent(t *testing.T) {
 	want := filepath.Join("/tmp/patty", "pattyControl.log")
 	if got := controlFilePath(); got != want {
 		t.Fatalf("controlFilePath() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureSaveDirCreatesConfiguredDirectory(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	dir := filepath.Join(t.TempDir(), "missing", "nested")
+	PattyGraph.pattyConfig.setSaveDir(dir)
+
+	if err := ensureSaveDir(PattyGraph.pattyConfig); err != nil {
+		t.Fatalf("ensureSaveDir() error = %v", err)
+	}
+	if info, err := os.Stat(dir); err != nil {
+		t.Fatalf("save-dir was not created: %v", err)
+	} else if !info.IsDir() {
+		t.Fatalf("save-dir path is not a directory")
+	}
+}
+
+func TestRuntimeSaveDirRejectsMissingDirectory(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	existing := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing")
+	PattyGraph.pattyConfig.setSaveDir(existing)
+
+	if !SetFlagByName("save-dir", missing) {
+		t.Fatal("SetFlagByName(save-dir) returned false")
+	}
+	if got := PattyGraph.pattyConfig.saveDir; got != existing {
+		t.Fatalf("saveDir = %q, want unchanged existing dir %q", got, existing)
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("missing runtime save-dir was created or stat failed unexpectedly: %v", err)
 	}
 }
 

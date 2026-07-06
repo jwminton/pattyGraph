@@ -22,7 +22,7 @@ const (
 	PattyGraphGithubUrl = "https://github.com/jwminton/pattyGraph"
 	PattyGraphName      = "PattyGraph"
 	// NOTE: PattyGraphVersion is used by compile.sh for repackaging labeling
-	PattyGraphVersion = "0.1.5"
+	PattyGraphVersion = "0.1.6-dev"
 )
 
 const (
@@ -1076,6 +1076,14 @@ func pushPrintNow(msg string) {
 func pushPrintNowf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	pushPrintNow(msg)
+}
+func pushErrorNow(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	pushPrintNow(PattyErrorColor + msg + "[default]")
+}
+func pushSystemNow(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	pushPrintNow(internalFmt(msg))
 }
 func pushPrintStat(label string, value any) {
 	pushPrintNow(fmt.Sprintf("[white]%s:[red]%v[default]", label, value))

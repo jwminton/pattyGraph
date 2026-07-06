@@ -316,8 +316,9 @@ func (m *Monitor) writePendingAlertTransitionsJSONL() {
 		return
 	}
 	for _, transition := range m.pendingAlertTransitions {
-		if err := m.WriteSidecarAlertJSONL(transition, ""); err != nil {
-			log.Printf("PattyLog alert jsonl write failed: %v", err)
+		recordSidecarWriteResult("alert", m.WriteSidecarAlertJSONL(transition, ""))
+		if !generateSidecarJSONL {
+			return
 		}
 	}
 }
@@ -491,6 +492,27 @@ func controlFilePath() string {
 	return "pattyControl.log"
 }
 
+func ensureSaveDir(conf *MonitorConfig) error {
+	if conf == nil || conf.saveDir == "" {
+		return nil
+	}
+	return os.MkdirAll(conf.saveDir, 0o755)
+}
+
+func saveDirExists(path string) error {
+	if path == "" {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("path is not a directory")
+	}
+	return nil
+}
+
 func parseControlEnabled(value string) bool {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "off", "false", "0", "no":
@@ -528,15 +550,18 @@ func startControlFileMonitoring() {
 	path := controlFilePath()
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
+		pushErrorNow("Control file unavailable: %s", err)
 		log.Printf("Failed to create control file %s: %v", path, err)
 		return
 	}
 	if _, err := fmt.Fprintln(f, controlFileStartMarker()); err != nil {
+		pushErrorNow("Control file marker failed: %s", err)
 		log.Printf("Failed to write control file marker %s: %v", path, err)
 		_ = f.Close()
 		return
 	}
 	if err := f.Close(); err != nil {
+		pushErrorNow("Control file close failed: %s", err)
 		log.Printf("Failed to close control file %s: %v", path, err)
 		return
 	}
@@ -548,6 +573,7 @@ func startControlFileMonitoring() {
 		Location: &tail.SeekInfo{Offset: 0, Whence: io.SeekEnd},
 	})
 	if err != nil {
+		pushErrorNow("Control file monitor failed: %s", err)
 		log.Printf("Failed to monitor control file %s: %v", path, err)
 		return
 	}
@@ -562,9 +588,7 @@ func startControlFileMonitoring() {
 			mu.Lock()
 			result := invokeInlineCommand(text)
 			if generateSidecarJSONL {
-				if err := PattyGraph.WriteSidecarControlCommandJSONL(text, "control_file", result, ""); err != nil {
-					log.Printf("PattyLog control command write failed: %v", err)
-				}
+				recordSidecarWriteResult("control command", PattyGraph.WriteSidecarControlCommandJSONL(text, "control_file", result, ""))
 			}
 			mu.Unlock()
 		}
@@ -625,7 +649,7 @@ func expandUser(path string) string {
 	return path
 }
 
-func (m *Monitor) printToFile() error {
+func (m *Monitor) printToFile() (string, error) {
 	filename := newTimestampedFilename("pattySplat_", ".txt")
 	fullPath := filename
 	if m.pattyConfig.saveDir != "" {
@@ -633,14 +657,14 @@ func (m *Monitor) printToFile() error {
 	}
 	file, err := os.Create(fullPath)
 	if err != nil {
-		return err
+		return fullPath, err
 	}
 	defer file.Close()
 
 	text := m.sparklineHistoryView.GetText(true)
 	_, err = file.WriteString(text)
 	if err != nil {
-		log.Fatalf("Error writing to file: %v", err)
+		return fullPath, err
 	}
 	err = WriteColumnsToFile(file,
 		m.botMatchesView.GetText(true),
@@ -648,9 +672,9 @@ func (m *Monitor) printToFile() error {
 		m.refsView.GetText(true),
 		m.ipsView.GetText(true))
 	if err != nil {
-		log.Fatalf("Error writing to file: %v", err)
+		return fullPath, err
 	}
-	return nil
+	return fullPath, nil
 }
 
 func (m *Monitor) purgeAllPeakContent() {
@@ -683,6 +707,7 @@ func (m *Monitor) playConfigFile(configFile string) {
 
 	f, err := os.Open(configFile)
 	if err != nil {
+		pushErrorNow("Config read failed: %s", err)
 		log.Printf("Failed to open config file %s: %v", configFile, err)
 		return
 	}
@@ -698,11 +723,12 @@ func (m *Monitor) playConfigFile(configFile string) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		pushErrorNow("Config scan failed: %s", err)
 		log.Printf("Error reading config file %s: %v", configFile, err)
 	}
 
 	for _, line := range lines {
-		invokeInlineCommand(line)
+		invokeInlineCommandWithOptions(line, InlineCommandOptions{allowCreateSaveDir: true})
 	}
 }
 

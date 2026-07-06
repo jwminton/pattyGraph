@@ -3,7 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func matcherIndexByNameForTest(name string) int {
 	for i, matcher := range PattyGraph.matchers {
@@ -300,6 +304,50 @@ func TestInlineControlCommandTogglesControlFileProcessing(t *testing.T) {
 	invokeInlineCommand("!!! control on")
 	if !enableControlFile {
 		t.Fatal("enableControlFile = false after !!! control on, want true")
+	}
+}
+
+func TestInlineSaveDirRejectsMissingDirectoryResult(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	existing := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "missing")
+	PattyGraph.pattyConfig.setSaveDir(existing)
+
+	result := invokeInlineCommand("!!! save-dir " + missing)
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q", result.Status, InlineCommandStatusRejected)
+	}
+	if result.Result["name"] != "save-dir" {
+		t.Fatalf("result name = %v, want save-dir", result.Result["name"])
+	}
+	if result.Result["path"] != missing {
+		t.Fatalf("result path = %v, want %s", result.Result["path"], missing)
+	}
+	if got := PattyGraph.pattyConfig.saveDir; got != existing {
+		t.Fatalf("saveDir = %q, want unchanged existing dir %q", got, existing)
+	}
+}
+
+func TestConfigInlineSaveDirCanCreateMissingDirectory(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	missing := filepath.Join(t.TempDir(), "missing", "nested")
+
+	result := invokeInlineCommandWithOptions(
+		"!!! save-dir "+missing,
+		InlineCommandOptions{allowCreateSaveDir: true},
+	)
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q", result.Status, InlineCommandStatusApplied)
+	}
+	if got := PattyGraph.pattyConfig.saveDir; got != missing {
+		t.Fatalf("saveDir = %q, want %q", got, missing)
+	}
+	if info, err := os.Stat(missing); err != nil {
+		t.Fatalf("config save-dir was not created: %v", err)
+	} else if !info.IsDir() {
+		t.Fatalf("config save-dir path is not a directory")
 	}
 }
 

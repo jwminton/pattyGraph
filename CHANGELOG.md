@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.5
+
+Focused on cleanup, internal clarity, and operator ergonomics after the alerting
+release.
+
+- Added the `Ctrl-H` quick help panel for terse in-TUI keyboard and mouse hints.
+- Added `--json-file` for stable PattyLog JSONL filenames under `<save-dir>`.
+- Removed stale experimental sparkgraph JSON output behavior in favor of
+  PattyLog JSONL.
+- Improved matcher, time-pressure, WordStats, inline-command, and factoid source
+  comments so the settled upon runtime behavior is easier to review.
+- Reorganized selected source files to make core monitor and matcher concepts
+  easier to find.
+- Fixed Bots startup/replay promotion behavior and added regression coverage.
+- Added or refined documentation for signal-first operation, lightweight
+  observation, click zones, bot-army detection, time pressure, and traffic speed.
+
 ## 0.1.4
 
 Alerting became part of the normal operational loop.

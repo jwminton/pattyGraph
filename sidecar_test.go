@@ -225,6 +225,38 @@ func TestSidecarSessionStartTruncatesConfiguredJSONFile(t *testing.T) {
 	}
 }
 
+func TestSidecarWriteFailuresDisableJSONLOutput(t *testing.T) {
+	generateSidecarJSONL = true
+	sidecarWriteFailures = 0
+	err := os.ErrPermission
+
+	recordSidecarWriteResult("test", err)
+	recordSidecarWriteResult("test", err)
+	if !generateSidecarJSONL {
+		t.Fatal("generateSidecarJSONL disabled before failure limit")
+	}
+
+	recordSidecarWriteResult("test", err)
+	if generateSidecarJSONL {
+		t.Fatal("generateSidecarJSONL still enabled after failure limit")
+	}
+}
+
+func TestSidecarWriteSuccessResetsFailureCount(t *testing.T) {
+	generateSidecarJSONL = true
+	sidecarWriteFailures = 0
+	err := os.ErrPermission
+
+	recordSidecarWriteResult("test", err)
+	recordSidecarWriteResult("test", nil)
+	recordSidecarWriteResult("test", err)
+	recordSidecarWriteResult("test", err)
+
+	if !generateSidecarJSONL {
+		t.Fatal("generateSidecarJSONL disabled despite success resetting failure count")
+	}
+}
+
 func TestSidecarControlCommandIncludesControlFileMetadata(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	enableControlFile = true

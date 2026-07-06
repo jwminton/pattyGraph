@@ -5,6 +5,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -432,6 +434,27 @@ func (m *Monitor) WriteSidecarAlertJSONL(transition AlertTransition, path string
 
 func (m *Monitor) WriteSidecarJSONL(snapshot SidecarInterval, path string) error {
 	return m.writeSidecarEventJSONL(snapshot, path)
+}
+
+const sidecarWriteFailureLimit = 3
+
+var sidecarWriteFailures int
+
+func recordSidecarWriteResult(label string, err error) {
+	if err == nil {
+		sidecarWriteFailures = 0
+		return
+	}
+	sidecarWriteFailures++
+	if sidecarWriteFailures >= sidecarWriteFailureLimit {
+		msg := fmt.Sprintf("PattyLog %s failed %d times; JSONL disabled", label, sidecarWriteFailures)
+		pushErrorNow("%s", msg)
+		log.Printf("%s: %v", msg, err)
+		generateSidecarJSONL = false
+		return
+	}
+	pushErrorNow("PattyLog %s write failed %d/%d", label, sidecarWriteFailures, sidecarWriteFailureLimit)
+	log.Printf("PattyLog %s write failed: %v", label, err)
 }
 
 func (m *Monitor) writeSidecarEventJSONL(event interface{}, path string) error {

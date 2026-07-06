@@ -178,8 +178,10 @@ func (m *Matcher) migrateTopBot(threshold float64) {
 		return fmt.Sprintf("!!! add %s", topBot)
 	}
 	PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, topBotMatcher)
+	botsIndex = botsMatcherIndex()
 	botsMigrated++
 	delete(m.matchCountsMap, topBot)
+	m.displayMatchedCache = ""
 }
 
 /************************************************************************

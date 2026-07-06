@@ -48,10 +48,17 @@ func inlineCommandRejected(commandName string, action string, message string) In
 	return result
 }
 
-// invokeInlineCommand applies one command after its source has already been
-// accepted as command input. The caller decides whether the source was a log
-// injection, control-file line, or config replay; command semantics stay here.
+type InlineCommandOptions struct {
+	allowCreateSaveDir bool
+}
+
+// invokeInlineCommand applies one runtime command after its source has already
+// been accepted as command input.
 func invokeInlineCommand(line string) InlineCommandResult {
+	return invokeInlineCommandWithOptions(line, InlineCommandOptions{})
+}
+
+func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) InlineCommandResult {
 	// Assume '!!! ' prefix already detected
 	commandLine := line[4:]
 	tokens := strings.Fields(commandLine)
@@ -399,6 +406,26 @@ func invokeInlineCommand(line string) InlineCommandResult {
 		}
 		args, _ := splitArgsShellStyle(commandLine[len(cmd):])
 		value := args[0]
+		if strings.EqualFold(cmd, "save-dir") {
+			expanded := expandUser(value)
+			if opts.allowCreateSaveDir {
+				if err := os.MkdirAll(expanded, 0o755); err != nil {
+					log.Printf("Rejected save-dir %s: %v", expanded, err)
+					result := inlineCommandRejected(cmd, "set_flag", fmt.Sprintf("save-dir unavailable: %v", err))
+					result.Result["name"] = "save-dir"
+					result.Result["value"] = value
+					result.Result["path"] = expanded
+					return result
+				}
+			} else if err := saveDirExists(expanded); err != nil {
+				log.Printf("Rejected save-dir %s: %v", expanded, err)
+				result := inlineCommandRejected(cmd, "set_flag", fmt.Sprintf("save-dir unavailable: %v", err))
+				result.Result["name"] = "save-dir"
+				result.Result["value"] = value
+				result.Result["path"] = expanded
+				return result
+			}
+		}
 		if !SetFlagByName(cmd, value) {
 			log.Printf("Unknown inline command: %s", commandLine)
 			return inlineCommandRejected(cmd, "unknown", "unknown inline command")
@@ -614,9 +641,16 @@ func purgePeakWordCommand() {
 	PattyGraph.ipsMatcher.purgePeakWords()
 }
 func pattySplat() {
-	PattyGraph.printToFile()
+	path, err := PattyGraph.printToFile()
+	if err != nil {
+		pushErrorNow("Splat write failed: %s", err)
+		log.Printf("Splat write failed for %s: %v", path, err)
+		return
+	}
+	pushSystemNow("Splat saved: %s", filepath.Base(path))
 }
-func dumpConfig() {
+
+func dumpConfig() (string, error) {
 	filename := newTimestampedFilename("pattyGraph_", ".conf")
 	fullPath := filename
 	if PattyGraph.pattyConfig.saveDir != "" {
@@ -624,42 +658,72 @@ func dumpConfig() {
 	}
 	f, err := os.Create(fullPath)
 	if err != nil {
-		return
+		pushErrorNow("Config write failed: %s", err)
+		log.Printf("Config write failed for %s: %v", fullPath, err)
+		return fullPath, err
 	}
 	defer f.Close()
-	writeConfig(f)
+	if err := writeConfig(f); err != nil {
+		pushErrorNow("Config write failed: %s", err)
+		log.Printf("Config write failed for %s: %v", fullPath, err)
+		return fullPath, err
+	}
+	pushSystemNow("Config saved: %s", filepath.Base(fullPath))
+	return fullPath, nil
 }
 
-func writeConfig(w io.Writer) {
+func writeConfig(w io.Writer) error {
+	write := func(format string, args ...any) error {
+		_, err := fmt.Fprintf(w, format, args...)
+		return err
+	}
 	// Config output is intentionally serialized as inline commands. Replay uses the
 	// same interpreter as live control, which keeps saved matcher state and startup
 	// configuration aligned with runtime behavior.
 	if machineDisplayName != "" {
-		io.WriteString(w, fmt.Sprintf(InlinePreamble+" title '%s'\n", machineDisplayName))
+		if err := write(InlinePreamble+" title '%s'\n", machineDisplayName); err != nil {
+			return err
+		}
 	}
 	if PattyGraph.pattyConfig.saveDir != "" {
-		io.WriteString(w, fmt.Sprintf(InlinePreamble+" save-dir '%s'\n", PattyGraph.pattyConfig.saveDirOriginal))
+		if err := write(InlinePreamble+" save-dir '%s'\n", PattyGraph.pattyConfig.saveDirOriginal); err != nil {
+			return err
+		}
 	}
 	if PattyGraph.pattyConfig.jsonFileOriginal != "" {
-		io.WriteString(w, fmt.Sprintf(InlinePreamble+" json-file '%s'\n", PattyGraph.pattyConfig.jsonFileOriginal))
+		if err := write(InlinePreamble+" json-file '%s'\n", PattyGraph.pattyConfig.jsonFileOriginal); err != nil {
+			return err
+		}
 	}
 	if pattyPushFactor != pattyPushFactorDefault {
-		io.WriteString(w, fmt.Sprintf(InlinePreamble+" push %d\n", pattyPushFactor))
+		if err := write(InlinePreamble+" push %d\n", pattyPushFactor); err != nil {
+			return err
+		}
 	}
 	if pattyGracePeriod != pattyGracePeriodDefault {
-		io.WriteString(w, fmt.Sprintf(InlinePreamble+" grace %d\n", pattyGracePeriod))
+		if err := write(InlinePreamble+" grace %d\n", pattyGracePeriod); err != nil {
+			return err
+		}
 	}
 	if fluxDepth != DefaultFluxDepth {
-		io.WriteString(w, fmt.Sprintf(InlinePreamble+" flux %d\n", fluxDepth))
+		if err := write(InlinePreamble+" flux %d\n", fluxDepth); err != nil {
+			return err
+		}
 	}
 	if pattyScaleFactor != pattyScaleFactorDefault {
-		io.WriteString(w, fmt.Sprintf(InlinePreamble+" scale %1.1f\n", pattyScaleFactor))
+		if err := write(InlinePreamble+" scale %1.1f\n", pattyScaleFactor); err != nil {
+			return err
+		}
 	}
 	if PattyGraph.pattyConfig.mbToRead != DefaultMBToRead {
-		io.WriteString(w, fmt.Sprintf(InlinePreamble+" read %d\n", PattyGraph.pattyConfig.mbToRead))
+		if err := write(InlinePreamble+" read %d\n", PattyGraph.pattyConfig.mbToRead); err != nil {
+			return err
+		}
 	}
 	if expertMode {
-		io.WriteString(w, InlinePreamble+" expert\n")
+		if err := write(InlinePreamble + " expert\n"); err != nil {
+			return err
+		}
 	}
 
 	// Iterate through matchers and write their inline command representation
@@ -669,15 +733,21 @@ func writeConfig(w io.Writer) {
 		}
 		cmd := m.asInlineCommand() // to be implemented per matcher
 		if cmd != "" {
-			io.WriteString(w, cmd+"\n")
+			if err := write("%s\n", cmd); err != nil {
+				return err
+			}
 		}
 		matcher := m.asMatcher()
 		if matcher != nil && matcher.displayMatchMode != 0 {
-			io.WriteString(w, fmt.Sprintf(InlinePreamble+" mode %s %d\n", matcher.name, matcher.displayMatchMode))
+			if err := write(InlinePreamble+" mode %s %d\n", matcher.name, matcher.displayMatchMode); err != nil {
+				return err
+			}
 		}
 		if matcher != nil {
 			for _, alertLine := range matcher.alertConfigLines() {
-				io.WriteString(w, alertLine+"\n")
+				if err := write("%s\n", alertLine); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -687,10 +757,15 @@ func writeConfig(w io.Writer) {
 		}
 		matcher := m.asMatcher()
 		if matcher != nil && matcher.isColorUserAssigned {
-			io.WriteString(w, fmt.Sprintf(InlinePreamble+" color %s %s\n", matcher.name, matcher.color))
+			if err := write(InlinePreamble+" color %s %s\n", matcher.name, matcher.color); err != nil {
+				return err
+			}
 		}
 	}
-	io.WriteString(w, fmt.Sprintf("#"+InlinePreamble+" color-index %d    # Next color index (Autogenerated)\n", colorIndex))
+	if err := write("#"+InlinePreamble+" color-index %d    # Next color index (Autogenerated)\n", colorIndex); err != nil {
+		return err
+	}
+	return nil
 }
 
 func setFlux(f int) bool {
@@ -709,6 +784,7 @@ func SetFlagByName(key string, value string) bool {
 	case "json":
 		if value == "on" {
 			generateSidecarJSONL = true
+			sidecarWriteFailures = 0
 		} else {
 			generateSidecarJSONL = PattyGraph.pattyConfig.jsonFile != ""
 		}
@@ -754,11 +830,17 @@ func SetFlagByName(key string, value string) bool {
 		machineDisplayName = value
 		return true
 	case "save-dir":
+		expanded := expandUser(value)
+		if err := saveDirExists(expanded); err != nil {
+			log.Printf("Rejected save-dir %s: %v", expanded, err)
+			return true
+		}
 		PattyGraph.pattyConfig.setSaveDir(value)
 		return true
 	case "json-file":
 		PattyGraph.pattyConfig.setJSONFile(value)
 		generateSidecarJSONL = PattyGraph.pattyConfig.jsonFile != ""
+		sidecarWriteFailures = 0
 		return true
 	case "color-index":
 		if newIndex, er := strconv.Atoi(value); er == nil {

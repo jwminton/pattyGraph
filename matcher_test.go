@@ -3,7 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func setupMatcherTestGraph() *Matcher {
 	bots := NewPredicateMatcher("Bots")
@@ -272,6 +275,62 @@ func TestBotsMigrationPromotesTopBotBeforeBots(t *testing.T) {
 	}
 	if PattyGraph.botsMatcher.intervalCount != 0 {
 		t.Fatalf("Bots intervalCount after migrated matcher wins = %d, want 0", PattyGraph.botsMatcher.intervalCount)
+	}
+}
+
+func TestBotsMigrationRefreshesBoundaryBeforeNextMatch(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	line := standardPipelineLine(
+		"192.0.2.10",
+		"/robots.txt",
+		"200",
+		"321",
+		"-",
+		"Mozilla/5.0 Googlebot",
+	)
+	match(line)
+
+	PattyGraph.botsMatcher.migrateBots(-1)
+
+	if botsIndex != botsMatcherIndex() {
+		t.Fatalf("botsIndex = %d, want refreshed index %d after migration", botsIndex, botsMatcherIndex())
+	}
+
+	match(line)
+
+	if got := PattyGraph.matchers[0].getCount(); got != 2 {
+		t.Fatalf("promoted matcher interval count = %d, want 2", got)
+	}
+	if got := PattyGraph.botsMatcher.intervalCount; got != 0 {
+		t.Fatalf("Bots intervalCount after promoted matcher wins = %d, want 0", got)
+	}
+	if _, exists := PattyGraph.botsMatcher.matchCountsMap["Googlebot"]; exists {
+		t.Fatal("Bots re-collected Googlebot after promoted matcher won")
+	}
+}
+
+func TestBotsMigrationInvalidatesMatchedDisplayCache(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	line := standardPipelineLine(
+		"192.0.2.10",
+		"/robots.txt",
+		"200",
+		"321",
+		"-",
+		"Mozilla/5.0 Googlebot",
+	)
+	match(line)
+
+	before := PattyGraph.botsMatcher.displayMatched()
+	if !strings.Contains(before, "Googlebot") {
+		t.Fatalf("pre-migration Bots display = %q, want Googlebot", before)
+	}
+
+	PattyGraph.botsMatcher.migrateBots(-1)
+
+	after := PattyGraph.botsMatcher.displayMatched()
+	if strings.Contains(after, "Googlebot") {
+		t.Fatalf("post-migration Bots display still contains Googlebot: %q", after)
 	}
 }
 

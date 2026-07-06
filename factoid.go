@@ -451,11 +451,11 @@ func NewFactoidGenerator() *FactoidGenerator {
 		l := len(PattyGraph.matchers)
 		return fmt.Sprintf(toolFmt("Matchers:%d"),
 			l)
-	}))
+	}), "matcher", "count")
 	g.Add(Random(5, func(_ []string) string {
 		return fmt.Sprintf(toolFmt("Shared min/max:%d/%d"),
 			PattyGraph.overallMin, PattyGraph.overallMax)
-	}))
+	}), "metrics", "sharedRange")
 
 	/********* MEM & GC STATS ************/
 	g.Add(Random(20, func(_ []string) string {
@@ -612,8 +612,11 @@ func NewFactoidGenerator() *FactoidGenerator {
 			len(generator.facts))
 	}), "factoids")
 	g.Add(Random(1, func(_ []string) string {
+		return fmt.Sprintf(internalFmt("%s:%s"), PattyGraphName, PattyGraphVersion)
+	}), "version", "pattyGraph")
+	g.Add(Random(1, func(_ []string) string {
 		return fmt.Sprintf(internalFmt("%s"), runtime.Version())
-	}), "go", "version")
+	}), "version", "go")
 	//g.Add(Random(5, func(_ []string) string {
 	//	wordCount := len(PattyGraph.wordsMatcher.wordFrequency)
 	//	ipCount := len(PattyGraph.ipsMatcher.wordFrequency)
@@ -642,32 +645,32 @@ func NewFactoidGenerator() *FactoidGenerator {
 			return "" // don't include this factoid if nothing's been injected
 		}
 		return fmt.Sprintf(PattyBotsColor+"Matchers auto-injected:[palegreen]%d[default]", bf)
-	}))
+	}), "matcher", "injected")
 	g.Add(Random(5, func(_ []string) string {
 		return fmt.Sprintf(PattyErrorColor+"Peak errs:%d[default]/min", peakErrs())
-	}))
+	}), "traffic", "peakErrs")
 	//g.Add(Random(1, func(_ []string) string {
 	//	return fmt.Sprintf(PattyLinesColor+"Total lines:%s[default]", strings.TrimSpace(formatCountsUint64(PattyGraph.totalLines)))
 	//}))
 	g.Add(Random(5, func(_ []string) string {
 		return fmt.Sprintf(PattyLinesColor+"Peak lines:%s[default]/min", peakLines())
-	}))
+	}), "traffic", "peakLines")
 	g.Add(Random(1, func(_ []string) string {
 		return fmt.Sprintf(PattyBytesColor+"Total bytes:%s[default]", strings.TrimSpace(formatBytes64(PattyGraph.totalBytes)))
-	}))
+	}), "traffic", "totalBytes")
 	g.Add(Random(5, func(_ []string) string {
 		return fmt.Sprintf(PattyBytesColor+"Peak bytes:%s[default]/min", peakBytes())
-	}))
+	}), "traffic", "peakBytes")
 
 	g.Add(Random(5, func(_ []string) string {
 		return fmt.Sprintf(PattyErrorColor+"Avg errs:%d[default]/min", avgErrs())
-	}))
+	}), "traffic", "avgErrs")
 	g.Add(Random(5, func(_ []string) string {
 		return fmt.Sprintf(PattyLinesColor+"Avg lines:%s[default]/min", avgLines())
-	}))
+	}), "traffic", "avgLines")
 	g.Add(Random(5, func(_ []string) string {
 		return fmt.Sprintf(PattyBytesColor+"Avg bytes:%s[default]/min", avgBytes())
-	}))
+	}), "traffic", "avgBytes")
 
 	//g.Add(Random(5, func(_ []string) string {
 	//	var mem runtime.MemStats
@@ -682,14 +685,6 @@ func NewFactoidGenerator() *FactoidGenerator {
 	//g.Add(Random(10, func(_ []string) string {
 	//	return fmt.Sprintf("LineCh: [palegreen]%d/%d[default]", len(lineCh), cap(lineCh))
 	//}))
-	g.Add(Random(5, func(_ []string) string {
-		saturation := 100 * len(lineCh) / cap(lineCh)
-		if saturation < 1 {
-			return ""
-		}
-		return fmt.Sprintf(internalFmt("LineCh Sat:%d%%"), saturation)
-	}))
-
 	//g.Add(Random(5, func(_ []string) string {
 	//	var m runtime.MemStats
 	//	runtime.ReadMemStats(&m)
@@ -701,12 +696,12 @@ func NewFactoidGenerator() *FactoidGenerator {
 		cur := len(PattyGraph.wordsMatcher.peakWords)
 		avg := PattyGraph.wordsMatcher.averagePeakWords()
 		return fmt.Sprintf(toolFmt("Words #Peak/avg:%d/%.0f"), cur, avg)
-	}))
+	}), "interesting", "wordsPeak")
 	g.Add(Random(10, func(_ []string) string {
 		cur := len(PattyGraph.refsMatcher.peakWords)
 		avg := PattyGraph.wordsMatcher.averagePeakWords()
 		return fmt.Sprintf(toolFmt("Refs #Peak/avg:%d/%.0f"), cur, avg)
-	}))
+	}), "interesting", "refsPeak")
 	g.Add(Random(15, func(_ []string) string {
 		singles := 0
 		total := len(PattyGraph.refsMatcher.wordFrequency)
@@ -1106,6 +1101,7 @@ func NewFactoidGenerator() *FactoidGenerator {
 	}
 
 	g.Add(Random(1, func(_ []string) string { return tipText("Config file lines are also inline commands") }), "tip", nextTip())
+	g.Add(Random(1, func(_ []string) string { return tipText("ctrl-h opens Quick Help") }), "tip", nextTip())
 	g.Add(Random(1, func(_ []string) string { return tipText("ctrl-g Generate config") }), "tip", nextTip())
 	g.Add(Random(1, func(_ []string) string { return tipText("ctrl-s Save screen") }), "tip", nextTip())
 	g.Add(Random(1, func(_ []string) string { return tipText("ctrl-m create matcher from selection") }), "tip", nextTip())
@@ -1208,28 +1204,33 @@ func currentTickerText() string {
 // quickHelpPanelContents is intentionally terse. It is an in-TUI memory aid, not
 // a replacement for --help.
 func quickHelpPanelContents() string {
-	return `[default:black]  KEYS   ^h back
-  tab view      esc clear
-  ^h help       q quit
-  ^p purge      ^g config
-  ^s splat
-  x expert      X ticker
-  f/F freeze    [] mini
-  <> grace      {} flux
-  ^left/^right  push
-  ^up/^down     scale
-  ^m add top
-  ^b add above Bots
-  ^n add below Bots
-  ^d delete/disable
-  U/D move matcher
+	return `[white:black]Quick Help
+[default:black] KEYS
+  [white:black]^h[default:black] help       [white:black]q[default:black] quit
+  [white:black]x[default:black] expert      [white:black]X[default:black] ticker
+  [white:black]^g[default:black] config     [white:black]^s[default:black] splat
+  [white:black]esc[default:black] clear selection
+  [white:black]tab[default:black] cycle info view
+  [white:black]</>[default:black] grace     [white:black]{/}[default:black] flux
+  [white:black]^left/^right[default:black]  push
+  [white:black]^up/^down[default:black]     scale
+  [white:black]^m[default:black] item top/Bots pop
+  [white:black]^b[default:black] item above Bots
+  [white:black]^n[default:black] item under Bots
+  [white:black]^d[default:black] delete/Bots off
+  [white:black]U/D[default:black] move matcher
+  [white:black]^p[default:black] clear matcher/Peak
+  [white:black][/][default:black] mini spark range
+  [white:black]f/F[default:black] freeze tui 5/10
 
-  MOUSE
-  ticker facts
-  row select
-  spark inspect
-  list select
-  ^click detail`
+ MOUSE
+  W/R/IP    entry select
+  spark     inspect
+  matcher   select
+  ^matcher  detail level
+  ticker    fact panel
+  ^ticker   hide
+`
 }
 
 // Factoid panel rendering reuses this builder because the panel is redrawn often.

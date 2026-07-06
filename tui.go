@@ -287,7 +287,12 @@ func setUIHook() {
 				} else if PattyGraph.showTicker &&
 					((PattyGraph.selectedInterestingMatcher != nil && index == matcherCount+1) ||
 						(PattyGraph.selectedInterestingMatcher == nil && index == matcherCount)) {
-					togglePreamble()
+					if hasControlKey {
+						PattyGraph.showTicker = !PattyGraph.showTicker
+						timeScaleCache = ""
+					} else {
+						togglePreamble()
+					}
 				}
 
 				//// selected interesting sparkline value selection
@@ -559,7 +564,9 @@ func setUIHook() {
 			return nil
 		case tcell.KeyCtrlM, tcell.KeyCtrlB, tcell.KeyCtrlN:
 			if event.Key() == tcell.KeyCtrlM && PattyGraph.selectedMatcher == PattyGraph.botsMatcher {
+				mu.Lock()
 				PattyGraph.botsMatcher.migrateBots(-1)
+				mu.Unlock()
 			} else if PattyGraph.selectedInterestingMatcher != nil {
 				newPattern := PattyGraph.selectedInterestingMatcher.selectedKey
 				if newPattern != "" {
@@ -692,9 +699,7 @@ func startUI() {
 					}
 					push()
 					if generateSidecarJSONL {
-						if err := PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""); err != nil {
-							log.Printf("PattyLog jsonl write failed: %v", err)
-						}
+						recordSidecarWriteResult("interval", PattyGraph.WriteSidecarJSONL(sidecarSnapshot, ""))
 					}
 					PattyGraph.writePendingAlertTransitionsJSONL()
 					PattyGraph.clearPendingAlertTransitions()

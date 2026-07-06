@@ -322,12 +322,13 @@ Keyboard Shortcuts:
    ctrl-down/ctrl-up (scale adjustment)
    [/] (Mini Sparkline sliding window adjustment)
        Decrease/increase secondary info display of interesting entries by 5
-   ctrl-m     Add selected entry as matcher (top of list)
-   ctrl-n     Add selected entry as non-competing matcher (below Bots)
+   ctrl-m     Add selected entry as matcher (top of list), or pop Bots top match
+   ctrl-n     Add selected entry as non-competing matcher (under Bots)
    ctrl-b     Add selected entry as matcher (above Bots)
    ctrl-s     Save screen to <save-dir>/pattySplat_<date>_<time>_<pid>.txt
    ctrl-g     Save config to <save-dir>/pattyGraph_<date>_<time>_<pid>.conf
    ctrl-h     Toggle quick help panel
+   ctrl-p     Clear matcher details if selected; otherwise purge Peak entries
    ctrl-d     Delete selected matcher (or disable Bots bot spawning)
    ctrl-f     Toggle random fact stream source
    U/D        Move selected matcher Up/Down 
