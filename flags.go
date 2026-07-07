@@ -29,7 +29,9 @@ type flagInfo struct {
 
 // flags is the canonical command-line metadata table. These names are reused by
 // usage category rendering, config replay, inline command handling, and final
-// MonitorConfig creation.
+// MonitorConfig creation. Adding a setting usually means updating this table,
+// MonitorConfig resolution, parseArgs, enforceCliFlags, SetFlagByName,
+// writeConfig, help text, and tests.
 var flags = []flagInfo{
 	{"title", "t", "", "Set title for display labeling (defaults to machine name)", "string"},
 	{"save-dir", "d", "", "Directory to save configs & splats", "string"},
@@ -50,6 +52,10 @@ var flags = []flagInfo{
 	{"help", "h", false, "Print this message or '-h <ai|layout|jsonl|inline|colors|words|facts>' for detailed help", "bool"},
 }
 
+// MonitorConfig keeps startup/config state that pflag alone cannot represent.
+// Path-like settings keep both the original user expression for config output
+// and the resolved path used at runtime. save-dir changes must refresh dependent
+// relative paths such as json-file and control-file.
 type MonitorConfig struct {
 	filePath            string
 	excludeRequest      bool
@@ -110,6 +116,10 @@ func printVersion() string {
 	return fmt.Sprintf("  %s %s by %s\n%s\n", PattyGraphName, PattyGraphVersion, PattyGraphAuthor, PattyGraphGithubUrl)
 }
 
+// parseArgs is the first configuration pass. It lets pflag parse the CLI,
+// builds MonitorConfig, and initializes globals that still drive the runtime.
+// main() later replays saved config files and then calls enforceCliFlags so
+// explicitly provided CLI values win over restored config state.
 func parseArgs() *MonitorConfig {
 	mConf := &MonitorConfig{
 		//intervalLength: DefaultIntervalSize,

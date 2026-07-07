@@ -105,7 +105,9 @@ func main() {
 
 func enforceCliFlags() {
 	// Reapply explicitly provided CLI flags after config replay so command-line
-	// choices remain authoritative.
+	// choices remain authoritative. This repeats some parseArgs behavior on
+	// purpose: config files are serialized as inline commands and replayed before
+	// startup, but direct CLI input should still be the final startup override.
 	pflag.Visit(func(f *pflag.Flag) {
 		switch f.Name {
 		case "read":

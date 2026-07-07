@@ -695,7 +695,8 @@ func writeConfig(w io.Writer) error {
 	}
 	// Config output is intentionally serialized as inline commands. Replay uses the
 	// same interpreter as live control, which keeps saved matcher state and startup
-	// configuration aligned with runtime behavior.
+	// configuration aligned with runtime behavior. This is why config generation
+	// preserves original path expressions while runtime state uses resolved paths.
 	if machineDisplayName != "" {
 		if err := write(InlinePreamble+" title '%s'\n", machineDisplayName); err != nil {
 			return err
@@ -800,6 +801,11 @@ func setFlux(f int) bool {
 	}
 	return false
 }
+
+// SetFlagByName is the shared setting mutator for inline commands and config
+// replay. It is not raw pflag parsing: callers have already decided whether the
+// source is trusted startup config or runtime input. Keep side effects here
+// aligned with writeConfig and the public help text.
 func SetFlagByName(key string, value string) bool {
 	switch key {
 	case "json":

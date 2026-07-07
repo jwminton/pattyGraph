@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.6
+
+Improves PattyGraph's live usability and operational feedback after `v0.1.5`.
+
+- Added an in-TUI quick help panel for terse key and mouse reminders.
+- Added cleaner JSONL and control-file configuration.
+- Added safer handling for repeated output failures.
+- Added more named factoids and operator-visible output feedback.
+- Improved Bots promotion behavior and matcher interaction help.
+- Expanded internal documentation around the configuration, inline command,
+  factoid, and matcher systems.
+
 ## 0.1.5
 
 Focused on cleanup, internal clarity, and operator ergonomics after the alerting
