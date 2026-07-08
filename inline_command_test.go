@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -138,8 +139,25 @@ func TestInlineJSONTogglesSidecarOutput(t *testing.T) {
 
 	invokeInlineCommand("!!! json-file current.jsonl")
 	invokeInlineCommand("!!! json off")
-	if !generateSidecarJSONL {
-		t.Fatal("json off disabled output implied by json-file")
+	if generateSidecarJSONL {
+		t.Fatal("json off did not disable output with json-file configured")
+	}
+}
+
+func TestInlineJSONRejectsInvalidBooleanValue(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	generateSidecarJSONL = false
+
+	result := invokeInlineCommand("!!! json maybe")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "invalid boolean value" {
+		t.Fatalf("error = %v, want invalid boolean value", result.Result["error"])
+	}
+	if generateSidecarJSONL {
+		t.Fatal("json maybe enabled JSONL output")
 	}
 }
 
@@ -199,6 +217,81 @@ func TestInlineDelDecoratedNameRemovesMatcher(t *testing.T) {
 
 	if matcherIndexByNameForTest("googlebot") != -1 {
 		t.Fatal("googlebot matcher still exists after decorated del")
+	}
+}
+
+func TestInlineDelRejectsMissingMatcher(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! del noSuchMatcher")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "matcher not found" {
+		t.Fatalf("error = %v, want matcher not found", result.Result["error"])
+	}
+	if result.Result["matcher_name"] != "noSuchMatcher" {
+		t.Fatalf("matcher_name = %v, want noSuchMatcher", result.Result["matcher_name"])
+	}
+}
+
+func TestInlineDelRejectsProtectedSystemMatcher(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! del lines")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "matcher cannot be deleted" {
+		t.Fatalf("error = %v, want matcher cannot be deleted", result.Result["error"])
+	}
+	if matcherIndexByNameForTest("lines") == -1 {
+		t.Fatal("lines matcher was removed")
+	}
+}
+
+func TestInlineAddBotsEnablesAutoAdd(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.botsMatcher.disableAutoAdd = true
+
+	result := invokeInlineCommand("!!! add Bots")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["action"] != "enable_bots_auto_add" {
+		t.Fatalf("action = %v, want enable_bots_auto_add", result.Result["action"])
+	}
+	if matcherIndexByNameForTest(BotsMatcherName) == -1 {
+		t.Fatal("Bots matcher was removed")
+	}
+	if matcherCountByNameForTest(BotsMatcherName) != 1 {
+		t.Fatalf("Bots matcher count = %d, want 1", matcherCountByNameForTest(BotsMatcherName))
+	}
+	if PattyGraph.botsMatcher.disableAutoAdd {
+		t.Fatal("Bots disableAutoAdd = true, want false")
+	}
+}
+
+func TestInlineDelBotsDisablesAutoAdd(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.botsMatcher.disableAutoAdd = false
+
+	result := invokeInlineCommand("!!! del Bots")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["action"] != "disable_bots_auto_add" {
+		t.Fatalf("action = %v, want disable_bots_auto_add", result.Result["action"])
+	}
+	if matcherIndexByNameForTest(BotsMatcherName) == -1 {
+		t.Fatal("Bots matcher was removed")
+	}
+	if !PattyGraph.botsMatcher.disableAutoAdd {
+		t.Fatal("Bots disableAutoAdd = false, want true")
 	}
 }
 
@@ -304,6 +397,44 @@ func TestInlineControlCommandTogglesControlFileProcessing(t *testing.T) {
 	invokeInlineCommand("!!! control on")
 	if !enableControlFile {
 		t.Fatal("enableControlFile = false after !!! control on, want true")
+	}
+}
+
+func TestInlineControlCommandAcceptsBooleanAliases(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	enableControlFile = false
+
+	result := invokeInlineCommand("!!! control yes")
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if !enableControlFile {
+		t.Fatal("control yes did not enable control file")
+	}
+
+	result = invokeInlineCommand("!!! control no")
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if enableControlFile {
+		t.Fatal("control no did not disable control file")
+	}
+}
+
+func TestInlineControlCommandRejectsInvalidBooleanValue(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	enableControlFile = false
+
+	result := invokeInlineCommand("!!! control maybe")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "invalid boolean value" {
+		t.Fatalf("error = %v, want invalid boolean value", result.Result["error"])
+	}
+	if enableControlFile {
+		t.Fatal("control maybe enabled control file")
 	}
 }
 
@@ -562,6 +693,358 @@ func TestInlineAddScopedIPReturnsResult(t *testing.T) {
 	patterns, ok := result.Result["patterns"].([]string)
 	if !ok || len(patterns) != 1 || patterns[0] != "91.99.72.15" {
 		t.Fatalf("patterns = %#v, want [91.99.72.15]", result.Result["patterns"])
+	}
+}
+
+func TestInlineAddAcceptsFlagFirstScope(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! add --refs refProbe filter")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["matcher_name"] != "refProbe" {
+		t.Fatalf("matcher_name = %v, want refProbe", result.Result["matcher_name"])
+	}
+	if result.Result["scope"] != "refs" {
+		t.Fatalf("scope = %v, want refs", result.Result["scope"])
+	}
+	if matcherIndexByNameForTest("-refs") != -1 {
+		t.Fatal("flag-first add created malformed -refs matcher")
+	}
+	if matcherIndexByNameForTest("refProbe") == -1 {
+		t.Fatal("refProbe matcher was not added")
+	}
+	patterns, ok := result.Result["patterns"].([]string)
+	if !ok || len(patterns) != 1 || patterns[0] != "filter" {
+		t.Fatalf("patterns = %#v, want [filter]", result.Result["patterns"])
+	}
+}
+
+func TestInlineAddAcceptsFlagFirstScopeWithPlacement(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! add --refs *observerProbe filter")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["matcher_name"] != "observerProbe" {
+		t.Fatalf("matcher_name = %v, want observerProbe", result.Result["matcher_name"])
+	}
+	if result.Result["placement"] != "before_lines" {
+		t.Fatalf("placement = %v, want before_lines", result.Result["placement"])
+	}
+	observerIndex := matcherIndexByNameForTest("observerProbe")
+	linesIndex := matcherIndexByNameForTest("lines")
+	if observerIndex == -1 {
+		t.Fatal("observerProbe matcher was not added")
+	}
+	if observerIndex <= botsIndex || observerIndex >= linesIndex {
+		t.Fatalf("observerProbe index = %d, want below Bots and before lines", observerIndex)
+	}
+}
+
+func TestInlineAddRejectsScopeFlagWithoutMatcherName(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! add --words")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "missing matcher name" {
+		t.Fatalf("error = %v, want missing matcher name", result.Result["error"])
+	}
+}
+
+func TestInlineAddRejectsFlagShapedMatcherName(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! add --unknown pattern")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "matcher name cannot look like a flag" {
+		t.Fatalf("error = %v, want matcher name cannot look like a flag", result.Result["error"])
+	}
+	if result.Result["raw_matcher_name"] != "--unknown" {
+		t.Fatalf("raw_matcher_name = %v, want --unknown", result.Result["raw_matcher_name"])
+	}
+}
+
+func TestInlineAddRejectsMatcherNameWithLiteralPlacementPrefix(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	for _, command := range []string{
+		"!!! add ++badName pattern",
+		"!!! add *+badName pattern",
+		"!!! add -+badName pattern",
+	} {
+		result := invokeInlineCommand(command)
+		if result.Status != InlineCommandStatusRejected {
+			t.Fatalf("%s status = %q, want %q: %#v", command, result.Status, InlineCommandStatusRejected, result.Result)
+		}
+		if result.Result["error"] != "matcher name cannot begin with a placement prefix" {
+			t.Fatalf("%s error = %v, want matcher name cannot begin with a placement prefix", command, result.Result["error"])
+		}
+		if result.Result["raw_matcher_name"] == "" {
+			t.Fatalf("%s raw_matcher_name was empty", command)
+		}
+		if result.Result["normalized_matcher_name"] == "" {
+			t.Fatalf("%s normalized_matcher_name was empty", command)
+		}
+	}
+}
+
+func TestInlineAddRejectsEmptyNameAfterPlacementPrefix(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! add + pattern")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "matcher name is empty after placement prefix" {
+		t.Fatalf("error = %v, want matcher name is empty after placement prefix", result.Result["error"])
+	}
+	if result.Result["raw_matcher_name"] != "+" {
+		t.Fatalf("raw_matcher_name = %v, want +", result.Result["raw_matcher_name"])
+	}
+}
+
+func TestInlineAddAcceptsFlagFirstRegex(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! add --regex botProbe Googlebot|bingbot")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["matcher_name"] != "botProbe" {
+		t.Fatalf("matcher_name = %v, want botProbe", result.Result["matcher_name"])
+	}
+	if result.Result["regex"] != true {
+		t.Fatalf("regex = %v, want true", result.Result["regex"])
+	}
+	if result.Result["scope"] != "regex" {
+		t.Fatalf("scope = %v, want regex", result.Result["scope"])
+	}
+}
+
+func TestInlineFactRejectsUnknownFactName(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts = NewFactoidGenerator()
+	facts.forced = nil
+
+	result := invokeInlineCommand("!!! fact no.such.fact")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "fact not found" {
+		t.Fatalf("error = %v, want fact not found", result.Result["error"])
+	}
+	if result.Result["fact"] != "no.such.fact" {
+		t.Fatalf("fact = %v, want no.such.fact", result.Result["fact"])
+	}
+	msg, _, _ := facts.Next()
+	if !strings.Contains(msg, "Factoid not found: no.such.fact") {
+		t.Fatalf("forced factoid = %q, want missing factoid error", msg)
+	}
+}
+
+func TestInlineFactAcceptsKnownFactName(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts = NewFactoidGenerator()
+
+	result := invokeInlineCommand("!!! fact output.health")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["fact"] != "output.health" {
+		t.Fatalf("fact = %v, want output.health", result.Result["fact"])
+	}
+}
+
+func TestInlineModeRejectsInvalidModeRange(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add modeProbe")
+
+	result := invokeInlineCommand("!!! mode modeProbe 9")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "invalid mode" {
+		t.Fatalf("error = %v, want invalid mode", result.Result["error"])
+	}
+	if result.Result["matcher_name"] != "modeProbe" {
+		t.Fatalf("matcher_name = %v, want modeProbe", result.Result["matcher_name"])
+	}
+	if result.Result["mode"] != 9 {
+		t.Fatalf("mode = %v, want 9", result.Result["mode"])
+	}
+}
+
+func TestInlineModeRejectsNegativeMode(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add modeProbe")
+
+	result := invokeInlineCommand("!!! mode modeProbe -1")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "invalid mode" {
+		t.Fatalf("error = %v, want invalid mode", result.Result["error"])
+	}
+}
+
+func TestInlineModeRejectsMissingMatcher(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! mode noSuchMatcher 1")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "matcher not found" {
+		t.Fatalf("error = %v, want matcher not found", result.Result["error"])
+	}
+	if result.Result["matcher_name"] != "noSuchMatcher" {
+		t.Fatalf("matcher_name = %v, want noSuchMatcher", result.Result["matcher_name"])
+	}
+}
+
+func TestInlineModeAcceptsValidMode(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add modeProbe")
+
+	result := invokeInlineCommand("!!! mode modeProbe 2")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["mode"] != 2 {
+		t.Fatalf("mode = %v, want 2", result.Result["mode"])
+	}
+	matcher := findMatcherByName("modeProbe")
+	if matcher == nil {
+		t.Fatal("modeProbe matcher was not found")
+	}
+	if matcher.displayMatchMode != 2 {
+		t.Fatalf("displayMatchMode = %d, want 2", matcher.displayMatchMode)
+	}
+}
+
+func TestInlineModeRejectsExtraArguments(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add modeProbe")
+
+	result := invokeInlineCommand("!!! mode modeProbe 2 extra")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "unexpected extra arguments" {
+		t.Fatalf("error = %v, want unexpected extra arguments", result.Result["error"])
+	}
+}
+
+func TestInlineModeAllowsTrailingComment(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add modeProbe")
+
+	result := invokeInlineCommand("!!! mode modeProbe 2 # useful note")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	matcher := findMatcherByName("modeProbe")
+	if matcher == nil {
+		t.Fatal("modeProbe matcher was not found")
+	}
+	if matcher.displayMatchMode != 2 {
+		t.Fatalf("displayMatchMode = %d, want 2", matcher.displayMatchMode)
+	}
+}
+
+func TestInlineColorRejectsMissingMatcher(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! color noSuchMatcher red")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "matcher not found" {
+		t.Fatalf("error = %v, want matcher not found", result.Result["error"])
+	}
+	if result.Result["matcher_name"] != "noSuchMatcher" {
+		t.Fatalf("matcher_name = %v, want noSuchMatcher", result.Result["matcher_name"])
+	}
+}
+
+func TestInlineColorAppliesToExistingMatcher(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add colorProbe")
+
+	result := invokeInlineCommand("!!! color colorProbe red")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["color"] != "[red]" {
+		t.Fatalf("color = %v, want [red]", result.Result["color"])
+	}
+	matcher := findMatcherByName("colorProbe")
+	if matcher == nil {
+		t.Fatal("colorProbe matcher was not found")
+	}
+	if matcher.color != "[red]" {
+		t.Fatalf("matcher color = %q, want [red]", matcher.color)
+	}
+}
+
+func TestInlineColorRejectsInvalidColorIndex(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add colorProbe")
+
+	result := invokeInlineCommand("!!! color colorProbe 9999")
+
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error"] != "invalid color index" {
+		t.Fatalf("error = %v, want invalid color index", result.Result["error"])
+	}
+	if result.Result["color"] != "9999" {
+		t.Fatalf("color = %v, want 9999", result.Result["color"])
+	}
+}
+
+func TestInlineColorAcceptsValidColorIndex(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add colorProbe")
+
+	result := invokeInlineCommand("!!! color colorProbe 0")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["color"] != AutobotColors[0] {
+		t.Fatalf("color = %v, want %s", result.Result["color"], AutobotColors[0])
+	}
+	matcher := findMatcherByName("colorProbe")
+	if matcher == nil {
+		t.Fatal("colorProbe matcher was not found")
+	}
+	if matcher.color != AutobotColors[0] {
+		t.Fatalf("matcher color = %q, want %s", matcher.color, AutobotColors[0])
 	}
 }
 

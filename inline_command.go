@@ -52,6 +52,61 @@ type InlineCommandOptions struct {
 	allowCreateSaveDir bool
 }
 
+func inlineAddScopeFlag(value string) string {
+	switch value {
+	case "--words":
+		return "words"
+	case "--refs":
+		return "refs"
+	case "--ips":
+		return "ips"
+	case "--code":
+		return "code"
+	case "--line":
+		return "line"
+	case "--regex":
+		return "regex"
+	default:
+		return ""
+	}
+}
+
+func inlineAddPatterns(args []string, start int) []string {
+	return inlineArgsBeforeComment(args[start:])
+}
+
+func inlineArgsBeforeComment(args []string) []string {
+	out := []string{}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "#") {
+			break
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func normalizeMatcherCommandName(name string) string {
+	if name == "" {
+		return name
+	}
+	if name[0:1] == "*" || name[0:1] == "+" || name[0:1] == "-" {
+		return name[1:]
+	}
+	return name
+}
+
+func inlineBoolValue(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "on", "true", "1", "yes":
+		return "on", true
+	case "off", "false", "0", "no":
+		return "off", true
+	default:
+		return "", false
+	}
+}
+
 // invokeInlineCommand applies one runtime command after its source has already
 // been accepted as command input.
 func invokeInlineCommand(line string) InlineCommandResult {
@@ -78,57 +133,70 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		}
 
 		isRegex := false
-		name := args[0]
 		scopeName := "line"
-		patterns := []string{}
-		// Check if second arg is a scope flag
-		if len(args) > 1 {
-			switch args[1] {
-			case "--words":
-				scopeName = "words"
-			case "--refs":
-				scopeName = "refs"
-			case "--ips":
-				scopeName = "ips"
-			case "--code":
-				scopeName = "code"
-			case "--line":
-				scopeName = "line"
-			case "--regex":
-				isRegex = true
-			default:
-				patterns = append(patterns, args[1])
+		name := args[0]
+		patternStart := 1
+
+		if inlineAddScopeFlag(args[0]) != "" {
+			if len(args) < 2 {
+				return inlineCommandRejected(cmd, "add_matcher", "missing matcher name")
 			}
+			scopeName = inlineAddScopeFlag(args[0])
+			isRegex = args[0] == "--regex"
+			name = args[1]
+			patternStart = 2
+		} else if len(args) > 1 && inlineAddScopeFlag(args[1]) != "" {
+			scopeName = inlineAddScopeFlag(args[1])
+			isRegex = args[1] == "--regex"
+			patternStart = 2
+		} else if strings.HasPrefix(args[0], "--") {
+			result := inlineCommandRejected(cmd, "add_matcher", "matcher name cannot look like a flag")
+			result.Result["raw_matcher_name"] = args[0]
+			return result
 		}
 
-		// Append any remaining args as patterns, trimming at '#' comment if present
-		if len(args) > 2 {
-			for _, arg := range args[2:] {
-				if strings.HasPrefix(arg, "#") {
-					break // Stop including args at the first '#' marker
-				}
-				patterns = append(patterns, arg)
-			}
-		}
+		patterns := inlineAddPatterns(args, patternStart)
 
 		originalName := name
 		if name[0:1] == "*" {
 			name = name[1:]
-		}
-		if name[0:1] == "+" {
+		} else if name[0:1] == "+" {
 			name = name[1:]
 		} else if name[0:1] == "-" {
 			name = name[1:]
 		}
+		if name == "" {
+			result := inlineCommandRejected(cmd, "add_matcher", "matcher name is empty after placement prefix")
+			result.Result["raw_matcher_name"] = originalName
+			return result
+		}
+		if strings.HasPrefix(name, "--") {
+			result := inlineCommandRejected(cmd, "add_matcher", "matcher name cannot look like a flag")
+			result.Result["raw_matcher_name"] = originalName
+			result.Result["normalized_matcher_name"] = name
+			return result
+		}
+		if name[0:1] == "*" || name[0:1] == "+" || name[0:1] == "-" {
+			result := inlineCommandRejected(cmd, "add_matcher", "matcher name cannot begin with a placement prefix")
+			result.Result["raw_matcher_name"] = originalName
+			result.Result["normalized_matcher_name"] = name
+			return result
+		}
+		if name == BotsMatcherName {
+			toggleBotsMatcher(false)
+			result := inlineCommandResult(cmd, InlineCommandStatusApplied, "enable_bots_auto_add")
+			result.Result["matcher_name"] = name
+			return result
+		}
 
 		if len(patterns) == 0 {
-			if name == "Browser" || name == "Platform" || name == "Bots" {
+			if name == "Browser" || name == "Platform" {
 				isRegex = true
 			} else {
 				patterns = []string{name}
 			}
 		}
-		if matcherNameExists(name) && !(name == "Bots" && isRegex && len(patterns) == 0) {
+		if matcherNameExists(name) {
 			return inlineCommandRejected(cmd, "add_matcher", "duplicate matcher name")
 		}
 		//newM := PattyGraph.createMatcher(name, isLikelyIPPattern(name), patterns)
@@ -136,13 +204,10 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		if isRegex {
 			if name == "Browser" && len(patterns) == 0 {
 				newM = newRegexMatcher(name, browserRegexString)
-			} else if name == "Bots" {
-				toggleBotsMatcher(false)
 			} else if name == "Platform" && len(patterns) == 0 {
 				newM = newRegexMatcher(name, platformRegexString)
 			} else {
-				index := strings.Index(commandLine, "--regex ")
-				newM = newRegexMatcher(name, strings.TrimSpace(commandLine[index+8:]))
+				newM = newRegexMatcher(name, strings.Join(patterns, " "))
 			}
 		} else {
 			switch scopeName {
@@ -259,6 +324,28 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			name = name[1:]
 			fromTop = false
 		}
+		matcher := findMatcherByName(name)
+		if matcher == nil {
+			result := inlineCommandRejected(cmd, "delete_matcher", "matcher not found")
+			result.Result["matcher_name"] = name
+			result.Result["from_top"] = fromTop
+			return result
+		}
+		if matcher == PattyGraph.botsMatcher {
+			toggleBotsMatcher(true)
+			result := inlineCommandResult(cmd, InlineCommandStatusApplied, "disable_bots_auto_add")
+			result.Result["matcher_name"] = name
+			result.Result["from_top"] = fromTop
+			return result
+		}
+		if matcher == PattyGraph.bytesMatcher ||
+			matcher == PattyGraph.linesMatcher ||
+			matcher == PattyGraph.errsMatcher {
+			result := inlineCommandRejected(cmd, "delete_matcher", "matcher cannot be deleted")
+			result.Result["matcher_name"] = name
+			result.Result["from_top"] = fromTop
+			return result
+		}
 		removeMatcherFromTop(name, fromTop)
 		botsIndex = botsMatcherIndex()
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "delete_matcher")
@@ -275,11 +362,17 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		if err != nil || len(args) < 2 {
 			return inlineCommandRejected(cmd, "set_matcher_mode", "missing mode")
 		}
+		args = inlineArgsBeforeComment(args)
+		if len(args) > 2 {
+			result := inlineCommandRejected(cmd, "set_matcher_mode", "unexpected extra arguments")
+			result.Result["matcher_name"] = name
+			result.Result["extra_args"] = args[2:]
+			return result
+		}
 		newMode, e := strconv.Atoi(args[1])
 		if e != nil {
 			return inlineCommandRejected(cmd, "set_matcher_mode", "invalid mode")
 		}
-		setMatcherMode(name, newMode)
 		// being nice for users doing a quick edit at the cli
 		// add +Matcher ...
 		// del +Matcher ....
@@ -292,6 +385,19 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		} else if name[0:1] == "-" {
 			name = name[1:]
 		}
+		if newMode < 0 || newMode > 2 {
+			result := inlineCommandRejected(cmd, "set_matcher_mode", "invalid mode")
+			result.Result["matcher_name"] = name
+			result.Result["mode"] = newMode
+			return result
+		}
+		if !matcherNameExists(name) {
+			result := inlineCommandRejected(cmd, "set_matcher_mode", "matcher not found")
+			result.Result["matcher_name"] = name
+			result.Result["mode"] = newMode
+			return result
+		}
+		setMatcherMode(name, newMode)
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_matcher_mode")
 		result.Result["matcher_name"] = name
 		result.Result["mode"] = newMode
@@ -304,22 +410,29 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		}
 		name := tokens[1]
 		color := tokens[2]
-		if len(color) <= 2 {
-			// color cannot be a valid color name or #FFFFFF value
-			// must be an attempted index.
-			if newIndex, err := strconv.Atoi(color); err == nil {
-				if newIndex < len(AutobotColors) {
-					color = AutobotColors[newIndex]
-				}
+		cleanName := normalizeMatcherCommandName(name)
+		if !matcherNameExists(cleanName) {
+			result := inlineCommandRejected(cmd, "set_matcher_color", "matcher not found")
+			result.Result["matcher_name"] = cleanName
+			result.Result["color"] = color
+			return result
+		}
+		if newIndex, err := strconv.Atoi(color); err == nil {
+			if newIndex < 0 || newIndex >= len(AutobotColors) {
+				result := inlineCommandRejected(cmd, "set_matcher_color", "invalid color index")
+				result.Result["matcher_name"] = cleanName
+				result.Result["color"] = color
+				return result
 			}
+			color = AutobotColors[newIndex]
 		}
 		// Pretty sure this is unused
 		if color[:1] != "[" {
 			color = "[" + color + "]"
 		}
-		reassignMatcherColor(name, color)
+		reassignMatcherColor(cleanName, color)
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_matcher_color")
-		result.Result["matcher_name"] = name
+		result.Result["matcher_name"] = cleanName
 		result.Result["color"] = color
 		return result
 
@@ -329,6 +442,12 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		}
 		args, _ := splitArgsShellStyle(commandLine[len(cmd):])
 		f := args[0]
+		if _, exists := factoidByName[strings.ToLower(f)]; !exists {
+			pushErrorNow("Factoid not found: %s", f)
+			result := inlineCommandRejected(cmd, "show_fact", "fact not found")
+			result.Result["fact"] = f
+			return result
+		}
 		pushFactNow(f, args[1:])
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "show_fact")
 		result.Result["fact"] = f
@@ -378,6 +497,13 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 				value = args[0]
 			}
 		}
+		normalizedValue, ok := inlineBoolValue(value)
+		if !ok {
+			result := inlineCommandRejected(cmd, "set_control_file_enabled", "invalid boolean value")
+			result.Result["value"] = value
+			return result
+		}
+		value = normalizedValue
 		SetFlagByName("control", value)
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_control_file_enabled")
 		result.Result["value"] = enableControlFile
@@ -442,6 +568,16 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			}
 			return result
 		}
+		if strings.EqualFold(cmd, "json") || strings.EqualFold(cmd, "control") {
+			normalizedValue, ok := inlineBoolValue(value)
+			if !ok {
+				result := inlineCommandRejected(cmd, "set_flag", "invalid boolean value")
+				result.Result["name"] = strings.ToLower(cmd)
+				result.Result["value"] = value
+				return result
+			}
+			value = normalizedValue
+		}
 		if !SetFlagByName(cmd, value) {
 			log.Printf("Unknown inline command: %s", commandLine)
 			return inlineCommandRejected(cmd, "unknown", "unknown inline command")
@@ -449,6 +585,9 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_flag")
 		result.Result["name"] = strings.ToLower(cmd)
 		result.Result["value"] = value
+		if strings.EqualFold(cmd, "json") {
+			result.Result["enabled"] = generateSidecarJSONL
+		}
 		return result
 	}
 }
@@ -812,10 +951,13 @@ func SetFlagByName(key string, value string) bool {
 		if value == "on" {
 			generateSidecarJSONL = true
 			sidecarWriteFailures = 0
-		} else {
-			generateSidecarJSONL = PattyGraph.pattyConfig.jsonFile != ""
+			return true
 		}
-		return true
+		if value == "off" {
+			generateSidecarJSONL = false
+			return true
+		}
+		return false
 	case "control":
 		enableControlFile = parseControlEnabled(value)
 		return true

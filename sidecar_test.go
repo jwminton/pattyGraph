@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -285,6 +286,40 @@ func TestSidecarControlCommandIncludesControlFileMetadata(t *testing.T) {
 	}
 	if event.Result["action"] != "add_matcher" {
 		t.Fatalf("result action = %v, want add_matcher", event.Result["action"])
+	}
+}
+
+func TestSidecarControlCommandWrittenWhenJSONOffDisablesOutput(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pattyLog.jsonl")
+	PattyGraph.pattyConfig.setJSONFile(path)
+	generateSidecarJSONL = true
+
+	command := "!!! json off"
+	wasSidecarEnabled := generateSidecarJSONL
+	result := invokeInlineCommand(command)
+	if generateSidecarJSONL {
+		t.Fatal("json off did not disable JSONL output")
+	}
+	if wasSidecarEnabled || generateSidecarJSONL {
+		if err := PattyGraph.WriteSidecarControlCommandJSONL(command, "control_file", result, ""); err != nil {
+			t.Fatalf("WriteSidecarControlCommandJSONL: %v", err)
+		}
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), `"event_type":"control_command"`) {
+		t.Fatalf("control command event missing: %s", data)
+	}
+	if !strings.Contains(string(data), `"command":"!!! json off"`) {
+		t.Fatalf("json off command missing: %s", data)
+	}
+	if !strings.Contains(string(data), `"enabled":false`) {
+		t.Fatalf("enabled=false missing: %s", data)
 	}
 }
 

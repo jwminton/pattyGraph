@@ -885,8 +885,8 @@ func MatcherFactory(matcherType string) *Matcher {
 	// Here for when included as part of startup, inline commands not processed here
 	case "Browser":
 		return newRegexMatcher(matcherType, browserRegexString)
-	case "Bots":
-		botsMatcher := NewPredicateMatcher("Bots")
+	case BotsMatcherName:
+		botsMatcher := NewPredicateMatcher(BotsMatcherName)
 		botsMatcher.predicateFuncs = []func() (bool, [][]string){isBotUAFaster}
 		botsMatcher.setColor(PattyBotsColor)
 		botsMatcher.isHistorical = true
@@ -910,7 +910,7 @@ func MatcherFactory(matcherType string) *Matcher {
 		}
 		botsMatcher.inlineCommandAction = func() string {
 			if PattyGraph.botsMatcher.disableAutoAdd {
-				return InlinePreamble + " del Bots"
+				return InlinePreamble + " del " + BotsMatcherName
 			}
 			return ""
 		}

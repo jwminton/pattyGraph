@@ -210,7 +210,7 @@ func isLowishHistory(color string) bool {
 
 // This is where more high level matchers were going to be injected. Browser detection, specialURL detection, etc.
 func namedMatchers() []*Matcher {
-	newM := MatcherFactory("Bots")
+	newM := MatcherFactory(BotsMatcherName)
 	return []*Matcher{newM}
 }
 
@@ -596,7 +596,7 @@ func insertMatcherFirst(oldMatchers []MatcherFacade, newMatcher MatcherFacade) [
 // above Bots. This is the default user-added matcher position.
 func insertMatcherBeforeBots(matchers []MatcherFacade, newMatcher MatcherFacade) []MatcherFacade {
 	for i, matcher := range matchers {
-		if matcher.matcherName() == "Bots" {
+		if matcher.matcherName() == BotsMatcherName {
 			matchers = append(matchers[:i], append([]MatcherFacade{newMatcher}, matchers[i:]...)...)
 			setMatcherColor(newMatcher.asMatcher())
 			newMatcher.asMatcher().isHistorical = true

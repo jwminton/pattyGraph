@@ -99,6 +99,8 @@ var currentLine = &lineSource{} // line currently being processed; only valid du
 var currentCycle int  // current cycle number counting up to DefaultIntervalSize
 var logicalCycles int // completed or skipped cycles since startup
 
+const BotsMatcherName = "Bots"
+
 // botsIndex is the matcher ordering boundary. Rows above Bots compete for a
 // line, Bots receives unclaimed bot-family traffic, and rows below Bots observe
 // the line without claiming it.
@@ -174,7 +176,7 @@ func NewMonitor(conf *MonitorConfig) *Monitor {
 	filePath := conf.filePath
 	var matchers []MatcherFacade
 
-	botsMatcher := MatcherFactory("Bots")
+	botsMatcher := MatcherFactory(BotsMatcherName)
 	matchers = append(matchers, botsMatcher)
 	linesMatcher := MatcherFactory("lines")
 	matchers = append(matchers, linesMatcher)
@@ -589,8 +591,9 @@ func startControlFileMonitoring() {
 				continue
 			}
 			mu.Lock()
+			wasSidecarEnabled := generateSidecarJSONL
 			result := invokeInlineCommand(text)
-			if generateSidecarJSONL {
+			if wasSidecarEnabled || generateSidecarJSONL {
 				recordSidecarWriteResult("control command", PattyGraph.WriteSidecarControlCommandJSONL(text, "control_file", result, ""))
 			}
 			mu.Unlock()

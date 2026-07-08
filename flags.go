@@ -429,8 +429,9 @@ Inject lines to manage pattyGraph operation:
 NOTE: Single quotes avoid shell command expansion
 
 Matcher Commands:
-  !!! add <flag*> <name> <pattern>...
-        valid flags: --refs, --words, or --ips
+  !!! add <name> [flag] <pattern>...
+  !!! add [flag] <name> <pattern>...
+        valid flags: --refs, --words, --ips, --code, --line, or --regex
       Add a matcher with one or more text patterns. Quoted patterns allowed.
       If a flag is given that 'interesting' scope is used. If no flag is given
       the entire log line is searched.
