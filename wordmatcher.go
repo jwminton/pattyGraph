@@ -145,7 +145,9 @@ func (m *InterestingWordMatcher) displayString() string {
 			stats = m.ipScratch.prefixStats[m.selectedKey]
 			if stats != nil {
 				sparkSlice = m.ipScratch.prefixHistorAggregateBufs[m.selectedKey].Slice()
-				fv = sparkSlice[len(sparkSlice)-1]
+				if len(sparkSlice) > 0 {
+					fv = sparkSlice[len(sparkSlice)-1]
+				}
 			}
 		} else if stats != nil {
 			sparkSlice = stats.historySlice()
@@ -1119,7 +1121,70 @@ func (m *InterestingWordMatcher) selectDisplayItem(selectionIndex int) {
 		PattyGraph.selectedInterestingMatcher = nil
 	} else {
 		PattyGraph.selectedInterestingMatcher = m
+		if PattyGraph.showTicker {
+			m.pushSelectionStats()
+		}
 	}
+}
+
+func (m *InterestingWordMatcher) pushSelectionStats() {
+	stats := m.selectedStats()
+	if stats == nil {
+		return
+	}
+	peak := stats.count
+	bottom := stats.count
+	sum := 0
+	historyLength := stats.historyLength()
+	avg := 0.0
+	if historyLength > 0 {
+		for _, count := range stats.historySlice() {
+			if count > peak {
+				peak = count
+			}
+			if count < bottom {
+				bottom = count
+			}
+			sum += count
+		}
+		avg = float64(sum) / float64(historyLength)
+	}
+	color := "[white]"
+	if captureColor := stats.captureColor(); captureColor != "" {
+		color = "[" + captureColor + "]"
+	}
+	pushPrintNow(fmt.Sprintf("%s %s%s[default]: ▲%s ▼%s ≈%.0f",
+		m.selectionLabel(),
+		color,
+		m.selectedKey,
+		trimmedCounts(peak),
+		trimmedCounts(bottom),
+		avg,
+	))
+}
+
+func (m *InterestingWordMatcher) selectionLabel() string {
+	switch m {
+	case PattyGraph.wordsMatcher:
+		return "word"
+	case PattyGraph.refsMatcher:
+		return "ref"
+	case PattyGraph.ipsMatcher:
+		return "ip"
+	default:
+		return m.mName
+	}
+}
+
+func (m *InterestingWordMatcher) selectedStats() *WordStats {
+	if m == nil || m.selectedKey == "" {
+		return nil
+	}
+	stats := m.wordFrequency[m.selectedKey]
+	if stats == nil && m.ipScratch != nil {
+		stats = m.ipScratch.prefixStats[m.selectedKey]
+	}
+	return stats
 }
 
 func (m *InterestingWordMatcher) selectDisplayItemByKey(selection string) (int, bool) {

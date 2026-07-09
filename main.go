@@ -99,7 +99,7 @@ func main() {
 	logLoadGCCost = stats.NumGC
 
 	startFileMonitoring() // tails the access log data plane
-	doRandom = true
+	doRandomFact = true
 	startUI() // Feeds tview's display cycle
 }
 

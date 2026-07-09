@@ -326,6 +326,69 @@ func TestInlineSelectInterestingMatcherByKey(t *testing.T) {
 	}
 }
 
+func TestInterestingSelectionPushesCompactFactoid(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts = NewFactoidGenerator()
+	facts.forced = nil
+	PattyGraph.showTicker = true
+	refs := PattyGraph.refsMatcher
+	stats := newWordStats()
+	stats.count = 2300
+	stats.historyBuf.Push(2400)
+	stats.historyBuf.Push(1200)
+	stats.source.captureColor = "[green]"
+	refs.wordFrequency["checkout"] = stats
+	refs.currentListing = []string{"checkout"}
+
+	refs.selectDisplayItem(0)
+
+	msg, _, _ := facts.Next()
+	if !strings.Contains(msg, "ref [green]checkout[default]:") {
+		t.Fatalf("factoid = %q, want selected ref message", msg)
+	}
+	if !strings.Contains(msg, "▲2400") || !strings.Contains(msg, "▼1200") || !strings.Contains(msg, "≈1800") {
+		t.Fatalf("factoid = %q, want min/max/avg counts", msg)
+	}
+}
+
+func TestInterestingSelectionFactoidHandlesNoHistory(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts = NewFactoidGenerator()
+	facts.forced = nil
+	PattyGraph.showTicker = true
+	words := PattyGraph.wordsMatcher
+	stats := newWordStats()
+	stats.count = 7
+	words.wordFrequency["fresh"] = stats
+	words.currentListing = []string{"fresh"}
+
+	words.selectDisplayItem(0)
+
+	msg, _, _ := facts.Next()
+	if strings.Contains(msg, "NaN") || strings.Contains(msg, "+Inf") || strings.Contains(msg, "-Inf") {
+		t.Fatalf("factoid = %q, want finite counts", msg)
+	}
+	if !strings.Contains(msg, "word [white]fresh[default]: ▲7 ▼7 ≈0") {
+		t.Fatalf("factoid = %q, want no-history fallback counts", msg)
+	}
+}
+
+func TestInterestingSelectionDisplayHandlesNoHistory(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.showTicker = false
+	words := PattyGraph.wordsMatcher
+	stats := newWordStats()
+	stats.count = 7
+	words.wordFrequency["fresh"] = stats
+	words.currentListing = []string{"fresh"}
+	words.selectDisplayItem(0)
+
+	display := words.displayString()
+	if !strings.Contains(display, "fresh") {
+		t.Fatalf("displayString() = %q, want selected key", display)
+	}
+}
+
 func TestInlineSelectWithoutArgsClearsInterestingSelection(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	refs := PattyGraph.refsMatcher
@@ -859,14 +922,30 @@ func TestInlineFactRejectsUnknownFactName(t *testing.T) {
 func TestInlineFactAcceptsKnownFactName(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	facts = NewFactoidGenerator()
+	facts.forced = nil
+	generateSidecarJSONL = true
+	enableControlFile = true
+	PattyGraph.pattyConfig.setSaveDir("/tmp/patty-splats")
+	PattyGraph.pattyConfig.setJSONFile("current.jsonl")
+	PattyGraph.pattyConfig.setControlFile("current.control")
 
-	result := invokeInlineCommand("!!! fact output.health")
+	result := invokeInlineCommand("!!! fact output.paths")
 
 	if result.Status != InlineCommandStatusApplied {
 		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
 	}
-	if result.Result["fact"] != "output.health" {
-		t.Fatalf("fact = %v, want output.health", result.Result["fact"])
+	if result.Result["fact"] != "output.paths" {
+		t.Fatalf("fact = %v, want output.paths", result.Result["fact"])
+	}
+	msg, _, _ := facts.Next()
+	if !strings.Contains(msg, "current.jsonl") || !strings.Contains(msg, "current.control") {
+		t.Fatalf("forced factoid = %q, want output filenames", msg)
+	}
+	if !strings.Contains(msg, "patty-splats") {
+		t.Fatalf("forced factoid = %q, want save-dir name", msg)
+	}
+	if strings.Contains(msg, "json:on") || strings.Contains(msg, "control:on") {
+		t.Fatalf("forced factoid = %q, want filenames instead of on", msg)
 	}
 }
 

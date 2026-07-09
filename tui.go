@@ -5,11 +5,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	"log"
 	"strings"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 func tabGlyph() string {
@@ -243,6 +244,11 @@ func (m *Monitor) pattyPushFactorIncr(increment int) bool {
 
 	This function is the spatial controller for the TUI: tview widgets provide
 	rendering surfaces, while PattyGraph owns the section-based gesture vocabulary.
+
+	Note: These calls are OUTSIDE the tview redraw looping lock and outside of
+	the main tail reading lock. The few places that touch PattyGraph.matchers or
+	any of the matching state will need to acquire the lock itself, mainly this will
+	be any PattyGraph.matchers type manipulations.
 */
 func setUIHook() {
 	PattyGraph.app.SetMouseCapture(func(event *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
@@ -462,40 +468,48 @@ func setUIHook() {
 				displayFreezeCountdown = 11
 				return nil
 			case 'U':
-				if PattyGraph.selectedMatcher == nil ||
-					PattyGraph.selectedMatcher.name == "lines" ||
-					PattyGraph.selectedMatcher.name == "bytes" ||
-					PattyGraph.selectedMatcher.name == "errs" {
-					return nil
-				}
-
-				for i := 1; i < len(PattyGraph.matchers); i++ {
-					if PattyGraph.matchers[i].asMatcher() == PattyGraph.selectedMatcher {
-						// Swap with the one above it
-						PattyGraph.matchers[i], PattyGraph.matchers[i-1] = PattyGraph.matchers[i-1], PattyGraph.matchers[i]
-						break
+				func() {
+					mu.Lock()
+					defer mu.Unlock()
+					if PattyGraph.selectedMatcher == nil ||
+						PattyGraph.selectedMatcher.name == "lines" ||
+						PattyGraph.selectedMatcher.name == "bytes" ||
+						PattyGraph.selectedMatcher.name == "errs" {
+						return
 					}
-				}
-				UpdateHistoricFlags()
+
+					for i := 1; i < len(PattyGraph.matchers); i++ {
+						if PattyGraph.matchers[i].asMatcher() == PattyGraph.selectedMatcher {
+							// Swap with the one above it
+							PattyGraph.matchers[i], PattyGraph.matchers[i-1] = PattyGraph.matchers[i-1], PattyGraph.matchers[i]
+							break
+						}
+					}
+					UpdateHistoricFlags()
+				}()
 				return nil
 			case 'D':
-				if PattyGraph.selectedMatcher == nil ||
-					PattyGraph.selectedMatcher.name == "lines" ||
-					PattyGraph.selectedMatcher.name == "bytes" ||
-					PattyGraph.selectedMatcher.name == "errs" {
-					return nil
-				}
-				for i := 0; i < len(PattyGraph.matchers)-1; i++ {
-					if PattyGraph.matchers[i+1].asMatcher() == PattyGraph.linesMatcher {
-						break
+				func() {
+					mu.Lock()
+					defer mu.Unlock()
+					if PattyGraph.selectedMatcher == nil ||
+						PattyGraph.selectedMatcher.name == "lines" ||
+						PattyGraph.selectedMatcher.name == "bytes" ||
+						PattyGraph.selectedMatcher.name == "errs" {
+						return
 					}
-					if PattyGraph.matchers[i].asMatcher() == PattyGraph.selectedMatcher {
-						// Swap with the one after it
-						PattyGraph.matchers[i], PattyGraph.matchers[i+1] = PattyGraph.matchers[i+1], PattyGraph.matchers[i]
-						break
+					for i := 0; i < len(PattyGraph.matchers)-1; i++ {
+						if PattyGraph.matchers[i+1].asMatcher() == PattyGraph.linesMatcher {
+							break
+						}
+						if PattyGraph.matchers[i].asMatcher() == PattyGraph.selectedMatcher {
+							// Swap with the one after it
+							PattyGraph.matchers[i], PattyGraph.matchers[i+1] = PattyGraph.matchers[i+1], PattyGraph.matchers[i]
+							break
+						}
 					}
-				}
-				UpdateHistoricFlags()
+					UpdateHistoricFlags()
+				}()
 				return nil
 			}
 
@@ -527,7 +541,7 @@ func setUIHook() {
 				return nil
 			}
 		case tcell.KeyCtrlF:
-			doRandom = !doRandom
+			doRandomFact = !doRandomFact
 			//firstColorWins = !firstColorWins
 			return nil
 		case tcell.KeyCtrlH:
@@ -538,12 +552,16 @@ func setUIHook() {
 			PattyGraph.purgeAllPeakContent()
 			return nil
 		case tcell.KeyCtrlD:
-			if PattyGraph.selectedMatcher == PattyGraph.botsMatcher {
-				toggleBotsMatcher(!PattyGraph.botsMatcher.disableAutoAdd)
-			} else {
-				// Delete Selected AutoMatcher (if there is one)
-				PattyGraph.deleteSelectedMatcher()
-			}
+			func() {
+				mu.Lock()
+				defer mu.Unlock()
+				if PattyGraph.selectedMatcher == PattyGraph.botsMatcher {
+					toggleBotsMatcher(!PattyGraph.botsMatcher.disableAutoAdd)
+				} else {
+					// Delete Selected AutoMatcher (if there is one)
+					PattyGraph.deleteSelectedMatcher()
+				}
+			}()
 			return nil
 		case tcell.KeyEscape:
 			if PattyGraph.selectedMatcher != nil {
@@ -557,70 +575,79 @@ func setUIHook() {
 			}
 			return nil
 		case tcell.KeyCtrlG:
-			dumpConfig()
+			func() {
+				mu.Lock()
+				defer mu.Unlock()
+				dumpConfig()
+			}()
 			return nil
 		case tcell.KeyCtrlS:
 			pattySplat()
 			return nil
 		case tcell.KeyCtrlM, tcell.KeyCtrlB, tcell.KeyCtrlN:
-			if event.Key() == tcell.KeyCtrlM && PattyGraph.selectedMatcher == PattyGraph.botsMatcher {
+			func() {
 				mu.Lock()
-				PattyGraph.botsMatcher.migrateBots(-1)
-				mu.Unlock()
-			} else if PattyGraph.selectedInterestingMatcher != nil {
-				newPattern := PattyGraph.selectedInterestingMatcher.selectedKey
-				if newPattern != "" {
-					if matcherNameExists(newPattern) {
-						return nil
-					}
-					var newM *Matcher
-					fmtString := ""
-					if event.Key() == tcell.KeyCtrlN {
-						fmtString = "*"
-					}
+				defer mu.Unlock()
+				if event.Key() == tcell.KeyCtrlM && PattyGraph.selectedMatcher == PattyGraph.botsMatcher {
+					PattyGraph.botsMatcher.migrateBots(-1)
+				} else if PattyGraph.selectedInterestingMatcher != nil {
+					newPattern := PattyGraph.selectedInterestingMatcher.selectedKey
+					if newPattern != "" {
+						if matcherNameExists(newPattern) {
+							return
+						}
+						var newM *Matcher
+						fmtString := ""
+						if event.Key() == tcell.KeyCtrlN {
+							fmtString = "*"
+						}
 
-					switch PattyGraph.selectedInterestingMatcher {
-					case PattyGraph.refsMatcher:
-						newM = RefsMatcher(newPattern, []string{newPattern})
-						newM.inlineCommandAction = func() string {
-							return fmt.Sprintf(InlinePreamble+" add %s%s --refs", fmtString, newPattern)
+						switch PattyGraph.selectedInterestingMatcher {
+						case PattyGraph.refsMatcher:
+							newM = RefsMatcher(newPattern, []string{newPattern})
+							newM.inlineCommandAction = func() string {
+								return fmt.Sprintf(InlinePreamble+" add %s%s --refs", fmtString, newPattern)
+							}
+						case PattyGraph.ipsMatcher:
+							adjusted := newPattern
+							if strings.Count(newPattern, ".") == 1 {
+								adjusted = newPattern + "."
+							}
+							newM = IpsMatcher(newPattern, []string{adjusted})
+							newM.inlineCommandAction = func() string {
+								return fmt.Sprintf(InlinePreamble+" add %s%s --ips", fmtString, adjusted)
+							}
+						case PattyGraph.wordsMatcher:
+							newM = WordsMatcher(newPattern, []string{newPattern})
+							newM.inlineCommandAction = func() string {
+								return fmt.Sprintf(InlinePreamble+" add %s%s --words", fmtString, newPattern)
+							}
 						}
-					case PattyGraph.ipsMatcher:
-						adjusted := newPattern
-						if strings.Count(newPattern, ".") == 1 {
-							adjusted = newPattern + "."
+						if newM == nil {
+							return
 						}
-						newM = IpsMatcher(newPattern, []string{adjusted})
-						newM.inlineCommandAction = func() string {
-							return fmt.Sprintf(InlinePreamble+" add %s%s --ips", fmtString, adjusted)
+						if entry, exists := PattyGraph.selectedInterestingMatcher.wordFrequency[newPattern]; exists {
+							newM.intervalCount = entry.count
+							newM.history = entry.historySlice() // matcher creation
+						} else if PattyGraph.selectedInterestingMatcher == PattyGraph.ipsMatcher && PattyGraph.ipsMatcher.ipScratch != nil {
+							// Prefix-group selections come from displayIpGroups; use the
+							// scratch aggregate as the source for the promoted matcher.
+							if newHistory, exists2 := PattyGraph.ipsMatcher.ipScratch.prefixHistorAggregateBufs[newPattern]; exists2 {
+								newM.intervalCount = PattyGraph.ipsMatcher.ipScratch.prefixCounts[newPattern]
+								newM.history = newHistory.Slice()
+							}
 						}
-					case PattyGraph.wordsMatcher:
-						newM = WordsMatcher(newPattern, []string{newPattern})
-						newM.inlineCommandAction = func() string {
-							return fmt.Sprintf(InlinePreamble+" add %s%s --words", fmtString, newPattern)
-						}
-					}
-					if entry, exists := PattyGraph.selectedInterestingMatcher.wordFrequency[newPattern]; exists {
-						newM.intervalCount = entry.count
-						newM.history = entry.historySlice() // matcher creation
-					} else if PattyGraph.selectedInterestingMatcher == PattyGraph.ipsMatcher && PattyGraph.ipsMatcher.ipScratch != nil {
-						// Prefix-group selections come from displayIpGroups; use the
-						// scratch aggregate as the source for the promoted matcher.
-						if newHistory, exists2 := PattyGraph.ipsMatcher.ipScratch.prefixHistorAggregateBufs[newPattern]; exists2 {
-							newM.intervalCount = PattyGraph.ipsMatcher.ipScratch.prefixCounts[newPattern]
-							newM.history = newHistory.Slice()
-						}
-					}
 
-					if event.Key() == tcell.KeyCtrlB {
-						PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, newM)
-					} else if event.Key() == tcell.KeyCtrlN {
-						PattyGraph.matchers = insertMatcherBeforeLines(PattyGraph.matchers, newM)
-					} else {
-						PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, newM)
+						if event.Key() == tcell.KeyCtrlB {
+							PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, newM)
+						} else if event.Key() == tcell.KeyCtrlN {
+							PattyGraph.matchers = insertMatcherBeforeLines(PattyGraph.matchers, newM)
+						} else {
+							PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, newM)
+						}
 					}
 				}
-			}
+			}()
 			return nil
 		}
 		return event // Pass other events through

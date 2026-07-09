@@ -354,9 +354,9 @@ func TestSidecarAlertUsesTransitionFields(t *testing.T) {
 }
 
 func TestBackgroundFactoidsDoNotConsumeStartupWelcome(t *testing.T) {
-	oldDoRandom := doRandom
-	doRandom = false
-	t.Cleanup(func() { doRandom = oldDoRandom })
+	oldDoRandom := doRandomFact
+	doRandomFact = false
+	t.Cleanup(func() { doRandomFact = oldDoRandom })
 
 	g := NewFactoidGenerator()
 	if len(g.forced) == 0 {

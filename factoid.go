@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"runtime/debug"
@@ -22,6 +23,9 @@ import (
 // from visible runtime language back to the implementation that produced it.
 // Stable names matter because --help facts, ticker output, sidecar summaries,
 // and debugging conversations can all use those names as handles into the code.
+// Factoid entries are visually separated by colored dividers, so the text inside
+// each entry should be greedy with space: prefer terse labels, compact symbols,
+// and trimmed count formatting over explanatory prose.
 //
 // Expect this file to stay broader and more experimental than the core ingestion
 // and matcher paths: new observations often start here before they prove whether
@@ -165,7 +169,7 @@ func (g *FactoidGenerator) Add(f *Factoid, name ...string) {
 	factoidByName[strings.ToLower(f.Name)] = f
 }
 
-var doRandom bool
+var doRandomFact bool
 
 func (g *FactoidGenerator) Next() (string, int, string) {
 	return g.next(true)
@@ -195,7 +199,7 @@ func (g *FactoidGenerator) next(includeForced bool) (string, int, string) {
 
 	var ready []*Factoid
 	// Give it 10 shots
-	if doRandom {
+	if doRandomFact {
 		for i := 0; i < 10; i++ {
 			for _, f := range g.facts {
 				if f.Condition(g.cycle, f.LastSeen, f.Shown) {
@@ -568,15 +572,15 @@ func NewFactoidGenerator() *FactoidGenerator {
 	g.Add(Random(3, func(_ []string) string {
 		jsonState := "off"
 		if generateSidecarJSONL {
-			jsonState = "on"
+			jsonState = filepath.Base(PattyGraph.SidecarDefaultPath())
 		}
 		controlState := "off"
 		if enableControlFile {
-			controlState = "on"
+			controlState = filepath.Base(controlFilePath())
 		}
 		saveState := "cwd"
 		if PattyGraph.pattyConfig != nil && PattyGraph.pattyConfig.saveDir != "" {
-			saveState = "dir"
+			saveState = filepath.Base(filepath.Clean(PattyGraph.pattyConfig.saveDir))
 		}
 		failState := ""
 		if sidecarWriteFailures > 0 {
@@ -587,7 +591,7 @@ func NewFactoidGenerator() *FactoidGenerator {
 			controlState,
 			saveState,
 			failState)
-	}), "output", "health")
+	}), "output", "paths")
 	//g.Add(Random(5, func(_ []string) string {
 	//	marked := PattyGraph.intervalLines - PattyGraph.unmarked
 	//	total := PattyGraph.intervalLines

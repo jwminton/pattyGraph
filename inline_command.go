@@ -107,8 +107,10 @@ func inlineBoolValue(value string) (string, bool) {
 	}
 }
 
-// invokeInlineCommand applies one runtime command after its source has already
-// been accepted as command input.
+// invokeInlineCommand applies one command after its source has already been
+// accepted as command input. Runtime callers that can overlap the tailer, TUI,
+// or control file monitor must hold mu before invoking it; startup config replay
+// is single-threaded and intentionally calls it without the runtime lock.
 func invokeInlineCommand(line string) InlineCommandResult {
 	return invokeInlineCommandWithOptions(line, InlineCommandOptions{})
 }
@@ -470,9 +472,9 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		result.Result["enabled"] = PattyGraph.demo
 		return result
 	case "facts.rnd", "FACTS.RND":
-		doRandom = !doRandom
+		doRandomFact = !doRandomFact
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "toggle_random_facts")
-		result.Result["enabled"] = doRandom
+		result.Result["enabled"] = doRandomFact
 		return result
 	case "ticker", "TICKER":
 		PattyGraph.showTicker = !PattyGraph.showTicker
