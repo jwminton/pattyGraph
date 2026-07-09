@@ -19,18 +19,41 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// PattyGraph is a terminal tool, not a library. It intentionally runs as one
-// process-wide singleton around a shared Monitor instance:
+// PattyGraph reads an NGINX access log as a live stream of traffic evidence.
+// Each request enters an ordered pipeline of matchers, bot handling, token
+// retention, IP/referrer/URI aggregation, alert checks, and time-windowed
+// history. A line can claim attention, reinforce an existing pattern, expose a
+// new token, update a retained counter, or pass through without becoming part of
+// the operational surface.
 //
-//	startFileMonitoring()        // tails the access log data plane
-//	startControlFileMonitoring() // tails the control file command plane
-//	startUI()                    // launches display
+// A useful shorthand for the design is grep with a sliding window, a memory,
+// and a garbage collector. Matching is only the first step. Recency, repetition,
+// contrast, matcher order, and retained state decide which facts survive long
+// enough to become signal.
 //
-// The access-log reader, control-file reader, and tview display loop take turns
-// on the same model lock. Some code reaches global runtime state directly where
-// a reusable library would pass dependencies more conservatively; that tradeoff
-// keeps the hot path simple, fast, and allocation-light for an interactive TUI
-// whose whole process exists to observe one log stream.
+// The display and JSONL output are projections of the same running model. The
+// terminal UI gives an engineer a live surface for triage. The JSONL sidecar
+// gives AI and other machine consumers compact context without asking them to
+// read the raw log stream.
+//
+// Measures in the model need useful dynamic ranges. A token, counter, or matcher
+// that is always saturated, always empty, or present in ordinary background
+// traffic adds little distinguishing value. PattyGraph favors signals that can
+// separate one traffic shape from another: a referrer shift, a URI fragment, an
+// IP cluster, a bot boundary crossing, a matcher spike, or a token that appears
+// where it normally does not. No mystery gets solved by tracking "Mozilla" in
+// NGINX user agents.
+//
+// The process is intentionally organized around one shared Monitor:
+//
+//     startFileMonitoring()        // access-log data plane
+//     startControlFileMonitoring() // control-file command plane
+//     startUI()                    // human display plane
+//
+// Matcher order, retained history, click selection, factoids, alerts, sidecar
+// snapshots, and time pressure are all views of the same running traffic shape.
+// Keeping them close to one shared model keeps the hot path fast, and the runtime
+// behavior coherent.
 
 var InterestingWordListSize = 100 // todo This needs to be settable
 var colorIndex = 0
@@ -62,10 +85,14 @@ func main() {
 	//	}
 	//}()
 
-	// parseArgs and NewMonitor are a somewhat combined application init, cli reading, default value enforcement, etc.
-	// CLI overrides were going to be problematic to pull out so instead they're enforced twice, here and below.
-	// It was just cleaner and easier to not disentangle it all and repeat the settings enforcement later with the
-	// pflag visitor pattern so only flags on the command line are processed the second time.
+	// Startup intentionally has three configuration passes:
+	//   1. parse CLI/defaults into a MonitorConfig
+	//   2. replay saved config as inline commands
+	//   3. reapply explicit CLI flags as final authority
+	//
+	// This looks heavier than direct pflag usage, but it keeps startup config,
+	// generated config, live control-file commands, and inline log commands on the
+	// same command language.
 	mConf := parseArgs()
 	PattyGraph = NewMonitor(mConf)
 	botsIndex = botsMatcherIndex()
@@ -89,6 +116,10 @@ func main() {
 	if generateSidecarJSONL {
 		recordSidecarWriteResult("session_start", PattyGraph.WriteSidecarSessionStartJSONL(""))
 	}
+	// Preload is part of the product behavior, not a warmup hack. Reading the
+	// recent tail of a large access log gives the TUI immediate traffic shape:
+	// matcher history, interesting-key rankings, peak entries, and bot competition
+	// are already populated before the operator sees the first screen.
 	beforeLoadTime := time.Now()
 	preloadRecentMinutes()
 	logLoadDuration = time.Since(beforeLoadTime)
