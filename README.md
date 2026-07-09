@@ -70,7 +70,17 @@ PattyGraph can give it the shape of the traffic first. Then the AI can decide wh
 
 ## Quick Start
 
-Build all targets (writes into `dist/`):
+Download prebuilt binaries:
+
+(See 'Download' section above)
+
+Standard go build:
+
+```bash
+go build
+````
+
+Build all distribution targets (writes into `dist/`):
 
 ```bash
 ./compile.sh
