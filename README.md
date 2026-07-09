@@ -181,9 +181,9 @@ Example:
 !!! color Googlebot green
 !!! mode Googlebot 1
 
-!!! add BadPaths .php wp-login xmlrpc
-!!! color BadPaths red
-!!! alert BadPaths above 10
+!!! add BadPath wp-login
+!!! color BadPath red
+!!! alert BadPath above 10
 ```
 
 Run with a saved configuration:
