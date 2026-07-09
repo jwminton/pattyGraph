@@ -89,18 +89,18 @@ Build all distribution targets (writes into `dist/`):
 Run (defaults to `./access.log` if no file is given):
 
 ```bash
-./dist/linux-amd64/pattyGraph
+./pattyGraph
 # or
-./dist/linux-amd64/pattyGraph /var/log/nginx/access.log
+./pattyGraph /var/log/nginx/access.log
 ```
 
 Helpful sub-help:
 
 ```bash
-./dist/linux-amd64/pattyGraph --help
-./dist/linux-amd64/pattyGraph --help layout
-./dist/linux-amd64/pattyGraph --help inline
-./dist/linux-amd64/pattyGraph --help colors
+./pattyGraph --help
+./pattyGraph --help layout
+./pattyGraph --help inline
+./pattyGraph --help colors
 ```
 
 ## Visual Diagnosis
@@ -156,12 +156,12 @@ echo '!!! add Applebot' >> access.log
 See:
 
 ```bash
-./dist/linux-amd64/pattyGraph --help inline
+./pattyGraph --help inline
 ```
 
 ## Configuration files
 
-PattyGraph configuration files are plain text. They use the same `!!!` inline commands accepted during live operation, but are read before log ingestion starts. This makes an investigation repeatable: tune matchers and display behavior during a session, save the configuration, then reuse that setup later.
+PattyGraph configuration files are plain text. They use the same `!!!` inline command format accepted during live operation, but are read before log ingestion starts. That means an investigation can become repeatable: tune matchers during a live session, save the setup, then reuse it later against the same log, a replay file, or a new production stream.
 
 Example:
 
@@ -181,12 +181,15 @@ Example:
 !!! color Googlebot green
 !!! mode Googlebot 1
 
+!!! add BadPaths .php wp-login xmlrpc
+!!! color BadPaths red
+!!! alert BadPaths above 10
 ```
 
 Run with a saved configuration:
 
 ```bash
-pattyGraph --config pattyGraph.conf /path/to/access.log
+./pattyGraph --config pattyGraph.conf /path/to/access.log
 ```
 
 Save the current matcher setup from a live session with `Ctrl-G` or the inline command:
