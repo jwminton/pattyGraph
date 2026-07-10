@@ -80,7 +80,7 @@ Standard go build:
 go build
 ```
 
-Build all distribution targets (writes into `dist/`):
+Build multiple distribution targets (writes into `dist/`):
 
 ```bash
 ./compile.sh
