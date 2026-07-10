@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -227,6 +228,7 @@ func TestSidecarSessionStartTruncatesConfiguredJSONFile(t *testing.T) {
 }
 
 func TestSidecarWriteFailuresDisableJSONLOutput(t *testing.T) {
+	silenceExpectedLogs(t)
 	generateSidecarJSONL = true
 	sidecarWriteFailures = 0
 	err := os.ErrPermission
@@ -244,6 +246,7 @@ func TestSidecarWriteFailuresDisableJSONLOutput(t *testing.T) {
 }
 
 func TestSidecarWriteSuccessResetsFailureCount(t *testing.T) {
+	silenceExpectedLogs(t)
 	generateSidecarJSONL = true
 	sidecarWriteFailures = 0
 	err := os.ErrPermission
@@ -286,6 +289,33 @@ func TestSidecarControlCommandIncludesControlFileMetadata(t *testing.T) {
 	}
 	if event.Result["action"] != "add_matcher" {
 		t.Fatalf("result action = %v, want add_matcher", event.Result["action"])
+	}
+}
+
+func TestSidecarControlCommandPreservesInvalidArgumentFields(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	path := filepath.Join(t.TempDir(), "pattyLog.jsonl")
+	result := invokeInlineCommand("!!! flux 99")
+
+	if err := PattyGraph.WriteSidecarControlCommandJSONL("!!! flux 99", "control_file", result, path); err != nil {
+		t.Fatalf("WriteSidecarControlCommandJSONL: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var event SidecarControlCommand
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if event.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q", event.Status, InlineCommandStatusRejected)
+	}
+	if event.Result["error_kind"] != "invalid_argument" ||
+		event.Result["argument"] != "flux" ||
+		event.Result["value"] != "99" ||
+		event.Result["error"] != "flux must be between 1 and 10" {
+		t.Fatalf("invalid argument result = %#v", event.Result)
 	}
 }
 

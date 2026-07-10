@@ -437,9 +437,9 @@ func NewFactoidGenerator() *FactoidGenerator {
 			fluxDepth)
 	}), "settings", "pressure")
 	g.Add(Random(4, func(_ []string) string {
-		c := AutobotColors[colorIndex+1]
+		c := AutobotColors[(colorIndex+1)%len(AutobotColors)]
 		return fmt.Sprintf(wrapFmt("Next Color:%s", c), c[1:len(c)-1])
-	}), "settings", "colorIndex")
+	}), "settings", "color-index")
 
 	g.Add(Random(10, func(_ []string) string {
 		return fmt.Sprintf(ipFmt("Active Prefixes:%d"),

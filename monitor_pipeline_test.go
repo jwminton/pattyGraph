@@ -4,21 +4,138 @@
 package main
 
 import (
+	"io"
+	"log"
 	"reflect"
 	"testing"
+	"time"
 )
 
+func silenceExpectedLogs(t *testing.T) {
+	t.Helper()
+	previous := log.Writer()
+	log.SetOutput(io.Discard)
+	t.Cleanup(func() {
+		log.SetOutput(previous)
+	})
+}
+
+// resetRuntimeGlobalsForTest returns package-level runtime state to the same
+// baseline a fresh process starts from. Tests may still override individual
+// values after setup when exercising a non-default configuration.
+func resetRuntimeGlobalsForTest() {
+	pattyPushFactor = pattyPushFactorDefault
+	pattyGracePeriod = pattyGracePeriodDefault
+	pattyScaleFactor = pattyScaleFactorDefault
+	fluxDepth = DefaultFluxDepth
+	colorIndex = 0
+	machineDisplayName = ""
+	forceZeroStart = false
+	expertMode = false
+	generateSidecarJSONL = false
+	enableControlFile = false
+	sidecarWriteFailures = 0
+	doRandomFact = false
+
+	currentCycle = 0
+	logicalCycles = 0
+	botsMigrated = 0
+	uaCardinalityMap = make(map[int]uint64, 20)
+	totalAgentTokenCount = 0
+	currentLine = &lineSource{}
+	lastMonitorMaxBuf = &ringBuffer{}
+	lastLinesBuf = &ringBuffer{}
+	lastBytesBuf = &ringBuffer{}
+	lineCh = nil
+	controlFileMonitorStarted = false
+
+	matcherColorMap = make(map[string]string)
+	firstColorWins = false
+	sparkColorCache = nil
+	lastGraceUsed = 0
+	displayFreezeCountdown = 0
+	displayMod = 1
+	timeScaleCache = ""
+	PattyGraphBuilderComplex = BuilderComplex{}
+	startTime = time.Time{}
+
+	poolNews = 0
+	poolGets = 0
+	poolReturns = 0
+	poolGetsMap = make(map[int]uint64, 20)
+	poolGetsPerMatcherMap = make(map[uint64]uint64, 20)
+
+	factoidByName = map[string]*Factoid{}
+	factoidHistory = nil
+	matcherMarchCount = 0
+	tickerBuffer = ""
+	tickerVisibleOffset = 0
+	bottomPanelCurrent = bottomPanelMatchers
+	bottomPanelReturnMode = bottomPanelMatchers
+	showMetricsPanelContents = false
+	tickerPreamble = defaultTickerBg
+	panelBuilder.Reset()
+
+	logLoadDuration = 0
+	logLoadLinecount = 0
+	logLoadIntervalCount = 0
+	logLoadGCCost = 0
+	startBytesRead = 0
+}
+
 func setupMonitorPipelineTestGraph() {
+	resetRuntimeGlobalsForTest()
 	PattyGraph = NewMonitor(&MonitorConfig{})
 	botsIndex = botsMatcherIndex()
 	PattyGraph.logtimeCache = nil
-	uaCardinalityMap = make(map[int]uint64, 20)
-	totalAgentTokenCount = 0
-	botsMigrated = 0
-	logicalCycles = 0
-	currentCycle = 0
-	fluxDepth = DefaultFluxDepth
-	*currentLine = lineSource{}
+	facts = NewFactoidGenerator()
+}
+
+func TestSetupMonitorPipelineTestGraphResetsRuntimeGlobals(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	pattyPushFactor = 11
+	pattyGracePeriod = 70
+	pattyScaleFactor = 4.0
+	fluxDepth = 9
+	colorIndex = 5
+	generateSidecarJSONL = true
+	enableControlFile = true
+	sidecarWriteFailures = 2
+	doRandomFact = true
+	matcherColorMap["stale"] = "[red]"
+	lastMonitorMaxBuf.Push(99)
+	factoidHistory = append(factoidHistory, "stale")
+	staleFact := factoidByName["settings.push"]
+	facts.forced = append(facts.forced, staleFact)
+	bottomPanelCurrent = bottomPanelFactoids
+	poolGets = 10
+
+	setupMonitorPipelineTestGraph()
+
+	if pattyPushFactor != pattyPushFactorDefault ||
+		pattyGracePeriod != pattyGracePeriodDefault ||
+		pattyScaleFactor != pattyScaleFactorDefault ||
+		fluxDepth != DefaultFluxDepth ||
+		colorIndex != 0 {
+		t.Fatal("setup did not restore default settings")
+	}
+	if generateSidecarJSONL || enableControlFile || sidecarWriteFailures != 0 || doRandomFact {
+		t.Fatal("setup did not restore output and control state")
+	}
+	_, staleColorPresent := matcherColorMap["stale"]
+	staleFactPresent := false
+	for _, forced := range facts.forced {
+		if forced == staleFact {
+			staleFactPresent = true
+			break
+		}
+	}
+	if staleColorPresent || lastMonitorMaxBuf.Len() != 0 || len(factoidHistory) != 0 || staleFactPresent {
+		t.Fatal("setup did not clear retained runtime state")
+	}
+	if bottomPanelCurrent != bottomPanelMatchers || poolGets != 0 {
+		t.Fatal("setup did not restore display and pool state")
+	}
 }
 
 func standardPipelineLine(ip, path, code, bytesValue, referer, userAgent string) string {

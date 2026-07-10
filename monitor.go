@@ -842,6 +842,11 @@ func maxOfFour(a, b, c, d int) int {
 	return d
 }
 
+// splitArgsShellStyle is the inline language's small quote-aware tokenizer, not
+// a general shell parser. Single or double quote bytes group spaces and are
+// removed; it performs no escaping, expansion, or substitution, and empty
+// quoted values are omitted. Generated config and command validation depend on
+// these deliberately narrow semantics.
 func splitArgsShellStyle(input string) ([]string, error) {
 	var args []string
 	var current strings.Builder

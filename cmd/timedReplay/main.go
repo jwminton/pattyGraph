@@ -61,6 +61,13 @@ func run(conf replayConfig) error {
 		return fmt.Errorf("open source log %q: %w", conf.sourcePath, err)
 	}
 	defer source.Close()
+	sourceInfo, err := source.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source log %q: %w", conf.sourcePath, err)
+	}
+	if err := rejectReplayOutputOverlap(conf.sourcePath, conf.outputPath, sourceInfo); err != nil {
+		return err
+	}
 
 	out, closeOut, err := openOutput(conf.outputPath)
 	if err != nil {
@@ -74,6 +81,31 @@ func run(conf replayConfig) error {
 	delay := time.Duration(float64(time.Second) / conf.speed)
 
 	return replay(source, out, delay, conf.sync0)
+}
+
+func rejectReplayOutputOverlap(sourcePath, outputPath string, sourceInfo os.FileInfo) error {
+	if outputPath == "-" {
+		outInfo, err := os.Stdout.Stat()
+		if err != nil || !outInfo.Mode().IsRegular() {
+			return nil
+		}
+		if os.SameFile(sourceInfo, outInfo) {
+			return fmt.Errorf("stdout is redirected to the source log %q; replay output must use a different file", sourcePath)
+		}
+		return nil
+	}
+
+	outInfo, err := os.Stat(outputPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat output log %q: %w", outputPath, err)
+	}
+	if os.SameFile(sourceInfo, outInfo) {
+		return fmt.Errorf("output log %q is the same file as source log %q; replay output must use a different file", outputPath, sourcePath)
+	}
+	return nil
 }
 
 func openOutput(path string) (io.Writer, func() error, error) {

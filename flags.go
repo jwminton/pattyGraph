@@ -272,8 +272,8 @@ func parseArgs() *MonitorConfig {
 
 	// Flag Validation
 	// Validate push factor
-	if pattyPushFactor < 1 || pattyPushFactor > 11 {
-		panic(fmt.Sprintf("Invalid push factor: %d. Valid values are 1-11.", pattyPushFactor))
+	if pattyPushFactor < 0 || pattyPushFactor > 11 {
+		panic(fmt.Sprintf("Invalid push factor: %d. Valid values are 0-11.", pattyPushFactor))
 	}
 	// Validate scale factor
 	if pattyScaleFactor < 0.1 || pattyScaleFactor > 4.0 {

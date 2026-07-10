@@ -4,6 +4,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,25 @@ func matcherCountByNameForTest(name string) int {
 		}
 	}
 	return count
+}
+
+func assertInlineInvalidArgument(t *testing.T, result InlineCommandResult, argument, value, message string) {
+	t.Helper()
+	if result.Status != InlineCommandStatusRejected {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
+	}
+	if result.Result["error_kind"] != "invalid_argument" {
+		t.Fatalf("error_kind = %v, want invalid_argument", result.Result["error_kind"])
+	}
+	if result.Result["argument"] != argument {
+		t.Fatalf("argument = %v, want %s", result.Result["argument"], argument)
+	}
+	if result.Result["value"] != value {
+		t.Fatalf("value = %v, want %q", result.Result["value"], value)
+	}
+	if result.Result["error"] != message {
+		t.Fatalf("error = %v, want %q", result.Result["error"], message)
+	}
 }
 
 func TestInlineAddUndecoratedNameInsertsBeforeBots(t *testing.T) {
@@ -105,6 +125,89 @@ func TestInlineAddRejectsDuplicateMatcherName(t *testing.T) {
 	}
 }
 
+func TestInlineAddRejectsMatcherNameContainingWhitespace(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	for _, command := range []string{
+		"!!! add 'space probe' image",
+		"!!! add --words 'space probe' image",
+		"!!! add +'space probe' image",
+	} {
+		result := invokeInlineCommand(command)
+		if result.Status != InlineCommandStatusRejected {
+			t.Fatalf("%s status = %q, want %q: %#v", command, result.Status, InlineCommandStatusRejected, result.Result)
+		}
+		if result.Result["error"] != "matcher name cannot contain whitespace" {
+			t.Fatalf("%s error = %v, want matcher name cannot contain whitespace", command, result.Result["error"])
+		}
+		if result.Result["error_kind"] != "invalid_argument" || result.Result["argument"] != "matcher_name" {
+			t.Fatalf("%s invalid argument fields = %#v", command, result.Result)
+		}
+		if result.Result["raw_matcher_name"] == "" {
+			t.Fatalf("%s raw_matcher_name was empty", command)
+		}
+		if result.Result["normalized_matcher_name"] != "space probe" {
+			t.Fatalf("%s normalized_matcher_name = %v, want space probe", command, result.Result["normalized_matcher_name"])
+		}
+	}
+
+	if matcherNameExists("space probe") {
+		t.Fatal("matcher with whitespace name was added")
+	}
+}
+
+func TestInlineAddMultiPatternLineMatcherUsesORPatterns(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! add bad-paths .css wslogin xmlrpc")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want applied: %#v", result.Status, result.Result)
+	}
+	if result.Result["matcher_name"] != "bad-paths" {
+		t.Fatalf("matcher_name = %v, want bad-paths", result.Result["matcher_name"])
+	}
+	if result.Result["scope"] != "line" {
+		t.Fatalf("scope = %v, want line", result.Result["scope"])
+	}
+	if result.Result["placement"] != "before_bots" {
+		t.Fatalf("placement = %v, want before_bots", result.Result["placement"])
+	}
+	patterns, ok := result.Result["patterns"].([]string)
+	if !ok || strings.Join(patterns, "|") != ".css|wslogin|xmlrpc" {
+		t.Fatalf("patterns = %#v, want [.css wslogin xmlrpc]", result.Result["patterns"])
+	}
+
+	matcherIndex := matcherIndexByNameForTest("bad-paths")
+	if matcherIndex == -1 {
+		t.Fatal("bad-paths matcher was not added")
+	}
+	if matcherIndex != botsIndex-1 {
+		t.Fatalf("bad-paths index = %d, want immediately before Bots at %d", matcherIndex, botsIndex-1)
+	}
+	badPaths := PattyGraph.matchers[matcherIndex].asMatcher()
+
+	match(standardPipelineLine("192.0.2.10", "/assets/site.css", "200", "100", "-", "Mozilla/5.0"))
+	if badPaths.intervalCount != 1 {
+		t.Fatalf(".css line count = %d, want 1", badPaths.intervalCount)
+	}
+
+	match(standardPipelineLine("192.0.2.11", "/wp-login.php", "404", "100", "-", "wslogin probe"))
+	if badPaths.intervalCount != 2 {
+		t.Fatalf("wslogin line count = %d, want 2", badPaths.intervalCount)
+	}
+
+	match(standardPipelineLine("192.0.2.12", "/xmlrpc.php", "404", "100", "-", "Mozilla/5.0"))
+	if badPaths.intervalCount != 3 {
+		t.Fatalf("xmlrpc line count = %d, want 3", badPaths.intervalCount)
+	}
+
+	match(standardPipelineLine("192.0.2.13", "/ordinary", "200", "100", "-", "Mozilla/5.0"))
+	if badPaths.intervalCount != 3 {
+		t.Fatalf("ordinary line count = %d, want unchanged 3", badPaths.intervalCount)
+	}
+}
+
 func TestInlineJSONFileImpliesJSONOutput(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	generateSidecarJSONL = false
@@ -150,12 +253,7 @@ func TestInlineJSONRejectsInvalidBooleanValue(t *testing.T) {
 
 	result := invokeInlineCommand("!!! json maybe")
 
-	if result.Status != InlineCommandStatusRejected {
-		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
-	}
-	if result.Result["error"] != "invalid boolean value" {
-		t.Fatalf("error = %v, want invalid boolean value", result.Result["error"])
-	}
+	assertInlineInvalidArgument(t, result, "json", "maybe", "json requires a boolean value")
 	if generateSidecarJSONL {
 		t.Fatal("json maybe enabled JSONL output")
 	}
@@ -490,15 +588,100 @@ func TestInlineControlCommandRejectsInvalidBooleanValue(t *testing.T) {
 
 	result := invokeInlineCommand("!!! control maybe")
 
-	if result.Status != InlineCommandStatusRejected {
-		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
-	}
-	if result.Result["error"] != "invalid boolean value" {
-		t.Fatalf("error = %v, want invalid boolean value", result.Result["error"])
-	}
+	assertInlineInvalidArgument(t, result, "control", "maybe", "control requires a boolean value")
 	if enableControlFile {
 		t.Fatal("control maybe enabled control file")
 	}
+}
+
+func TestInlineSettingsRejectInvalidArguments(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.pattyConfig.mbToRead = DefaultMBToRead
+
+	tests := []struct {
+		command  string
+		argument string
+		value    string
+		message  string
+	}{
+		{"!!! push nope", "push", "nope", "push requires an integer"},
+		{"!!! push -1", "push", "-1", "push must be between 0 and 11"},
+		{"!!! push 12", "push", "12", "push must be between 0 and 11"},
+		{"!!! grace nope", "grace", "nope", "grace requires an integer"},
+		{"!!! flux nope", "flux", "nope", "flux requires an integer"},
+		{"!!! flux 99", "flux", "99", "flux must be between 1 and 10"},
+		{"!!! scale nope", "scale", "nope", "scale requires a number"},
+		{"!!! scale NaN", "scale", "NaN", "scale must be a finite number"},
+		{"!!! read nope", "read", "nope", "read requires an integer"},
+		{"!!! read -1", "read", "-1", "read must be zero or greater"},
+		{"!!! color-index nope", "color-index", "nope", "color-index requires an integer"},
+		{
+			fmt.Sprintf("!!! color-index %d", len(AutobotColors)),
+			"color-index",
+			fmt.Sprintf("%d", len(AutobotColors)),
+			fmt.Sprintf("color-index must be between 0 and %d", len(AutobotColors)-1),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.command, func(t *testing.T) {
+			result := invokeInlineCommand(test.command)
+			assertInlineInvalidArgument(t, result, test.argument, test.value, test.message)
+		})
+	}
+
+	if pattyPushFactor != pattyPushFactorDefault ||
+		pattyGracePeriod != pattyGracePeriodDefault ||
+		pattyScaleFactor != pattyScaleFactorDefault ||
+		fluxDepth != DefaultFluxDepth ||
+		colorIndex != 0 ||
+		PattyGraph.pattyConfig.mbToRead != DefaultMBToRead {
+		t.Fatal("invalid setting argument changed runtime state")
+	}
+}
+
+func TestInlinePushAcceptsZero(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! push 0")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if pattyPushFactor != 0 {
+		t.Fatalf("pattyPushFactor = %d, want 0", pattyPushFactor)
+	}
+	if result.Result["value"] != "0" {
+		t.Fatalf("value = %v, want 0", result.Result["value"])
+	}
+}
+
+func TestInlineColorIndexPushesRegisteredFactoid(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts.forced = nil
+
+	result := invokeInlineCommand("!!! color-index 1")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	message, _, factName := facts.Next()
+	if factName != "settings.color-index" {
+		t.Fatalf("fact name = %q, want settings.color-index", factName)
+	}
+	if !strings.Contains(message, "Next Color:") {
+		t.Fatalf("fact message = %q, want Next Color", message)
+	}
+}
+
+func TestInlinePropertyRejectsMalformedOrEmptyValue(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! title '")
+	assertInlineInvalidArgument(t, result, "title", "'", "unclosed quote in input")
+
+	result = invokeInlineCommand("!!! title ''")
+	assertInlineInvalidArgument(t, result, "title", "", "title requires a value")
 }
 
 func TestInlineControlFileRuntimeUpdatesConfigOnly(t *testing.T) {
@@ -544,6 +727,7 @@ func TestConfigInlineControlFileImpliesControl(t *testing.T) {
 }
 
 func TestInlineSaveDirRejectsMissingDirectoryResult(t *testing.T) {
+	silenceExpectedLogs(t)
 	setupMonitorPipelineTestGraph()
 	existing := t.TempDir()
 	missing := filepath.Join(t.TempDir(), "missing")
@@ -897,6 +1081,36 @@ func TestInlineAddAcceptsFlagFirstRegex(t *testing.T) {
 	}
 }
 
+func TestInlineAddRejectsInvalidRegexWithCompilerDetail(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	for _, command := range []string{
+		"!!! add regexProbe --regex '[invalid'",
+		"!!! add --regex regexProbe '[invalid'",
+	} {
+		result := invokeInlineCommand(command)
+		if result.Status != InlineCommandStatusRejected {
+			t.Fatalf("%s status = %q, want %q: %#v", command, result.Status, InlineCommandStatusRejected, result.Result)
+		}
+		if result.Result["error_kind"] != "invalid_argument" {
+			t.Fatalf("%s error_kind = %v, want invalid_argument", command, result.Result["error_kind"])
+		}
+		if result.Result["argument"] != "regex" || result.Result["value"] != "[invalid" {
+			t.Fatalf("%s regex fields = %#v", command, result.Result)
+		}
+		errorMessage, ok := result.Result["error"].(string)
+		if !ok || !strings.Contains(errorMessage, "invalid regex pattern:") || !strings.Contains(errorMessage, "missing closing ]") {
+			t.Fatalf("%s error = %v, want regex compiler detail", command, result.Result["error"])
+		}
+		if result.Result["matcher_name"] != "regexProbe" {
+			t.Fatalf("%s matcher_name = %v, want regexProbe", command, result.Result["matcher_name"])
+		}
+		if matcherNameExists("regexProbe") {
+			t.Fatalf("%s added matcher after regex rejection", command)
+		}
+	}
+}
+
 func TestInlineFactRejectsUnknownFactName(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	facts = NewFactoidGenerator()
@@ -955,12 +1169,7 @@ func TestInlineModeRejectsInvalidModeRange(t *testing.T) {
 
 	result := invokeInlineCommand("!!! mode modeProbe 9")
 
-	if result.Status != InlineCommandStatusRejected {
-		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
-	}
-	if result.Result["error"] != "invalid mode" {
-		t.Fatalf("error = %v, want invalid mode", result.Result["error"])
-	}
+	assertInlineInvalidArgument(t, result, "mode", "9", "mode must be between 0 and 2")
 	if result.Result["matcher_name"] != "modeProbe" {
 		t.Fatalf("matcher_name = %v, want modeProbe", result.Result["matcher_name"])
 	}
@@ -975,12 +1184,7 @@ func TestInlineModeRejectsNegativeMode(t *testing.T) {
 
 	result := invokeInlineCommand("!!! mode modeProbe -1")
 
-	if result.Status != InlineCommandStatusRejected {
-		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
-	}
-	if result.Result["error"] != "invalid mode" {
-		t.Fatalf("error = %v, want invalid mode", result.Result["error"])
-	}
+	assertInlineInvalidArgument(t, result, "mode", "-1", "mode must be between 0 and 2")
 }
 
 func TestInlineModeRejectsMissingMatcher(t *testing.T) {
@@ -1089,18 +1293,60 @@ func TestInlineColorAppliesToExistingMatcher(t *testing.T) {
 	}
 }
 
+func TestInlineColorRejectsExtraArgumentsWithoutChangingColor(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add colorProbe")
+	matcher := findMatcherByName("colorProbe")
+	if matcher == nil {
+		t.Fatal("colorProbe matcher was not found")
+	}
+	originalColor := matcher.color
+
+	result := invokeInlineCommand("!!! color colorProbe red unintended-extra")
+
+	assertInlineInvalidArgument(
+		t,
+		result,
+		"extra_args",
+		"unintended-extra",
+		"color accepts a matcher name and one color",
+	)
+	if matcher.color != originalColor {
+		t.Fatalf("matcher color = %q, want unchanged %q", matcher.color, originalColor)
+	}
+	if extras, ok := result.Result["extra_args"].([]string); !ok || strings.Join(extras, " ") != "unintended-extra" {
+		t.Fatalf("extra_args = %#v, want [unintended-extra]", result.Result["extra_args"])
+	}
+}
+
+func TestInlineColorAllowsTrailingComment(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	invokeInlineCommand("!!! add colorProbe")
+
+	result := invokeInlineCommand("!!! color colorProbe #FF0000 # useful note")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	matcher := findMatcherByName("colorProbe")
+	if matcher == nil || matcher.color != "[#FF0000]" {
+		t.Fatalf("matcher color = %v, want [#FF0000]", matcher)
+	}
+}
+
 func TestInlineColorRejectsInvalidColorIndex(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	invokeInlineCommand("!!! add colorProbe")
 
 	result := invokeInlineCommand("!!! color colorProbe 9999")
 
-	if result.Status != InlineCommandStatusRejected {
-		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusRejected, result.Result)
-	}
-	if result.Result["error"] != "invalid color index" {
-		t.Fatalf("error = %v, want invalid color index", result.Result["error"])
-	}
+	assertInlineInvalidArgument(
+		t,
+		result,
+		"color",
+		"9999",
+		fmt.Sprintf("color index must be between 0 and %d", len(AutobotColors)-1),
+	)
 	if result.Result["color"] != "9999" {
 		t.Fatalf("color = %v, want 9999", result.Result["color"])
 	}

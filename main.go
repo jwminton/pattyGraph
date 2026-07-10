@@ -20,11 +20,13 @@ import (
 )
 
 // PattyGraph reads an NGINX access log as a live stream of traffic evidence.
-// Each request enters an ordered pipeline of matchers, bot handling, token
-// retention, IP/referrer/URI aggregation, alert checks, and time-windowed
-// history. A line can claim attention, reinforce an existing pattern, expose a
-// new token, update a retained counter, or pass through without becoming part of
-// the operational surface.
+// In particular, PattyGraph is written like a high performance enterprise
+// levevl server that returns no response. Each logline (request) enters an
+// ordered pipeline of matchers, bot handling, token retention, IP/referrer/URI
+// aggregation, alert checks, and time-windowed history. A line can claim
+// attention, reinforce an existing pattern, expose a new token, update a
+// retained counter, or pass through without becoming part of the operational
+// surface.
 //
 // A useful shorthand for the design is grep with a sliding window, a memory,
 // and a garbage collector. Matching is only the first step. Recency, repetition,
@@ -187,7 +189,7 @@ func enforceCliFlags() {
 			value, _ := strconv.Atoi(f.Value.String())
 			if value != colorIndex {
 				colorIndex = value
-				pushFactNow("settings.colorIndex", nil)
+				pushFactNow("settings.color-index", nil)
 			}
 		case "save-dir":
 			PattyGraph.pattyConfig.setSaveDir(f.Value.String())

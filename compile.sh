@@ -2,6 +2,9 @@
 # Copyright 2026 Jasen Minton
 #
 # SPDX-License-Identifier: Apache-2.0
+#
+# This srcipt is meant for distribution specific binary constructions.
+
 
 # The name of your output binary
 APP_NAME="pattyGraph"

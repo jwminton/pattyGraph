@@ -55,6 +55,7 @@ func TestEnsureSaveDirCreatesConfiguredDirectory(t *testing.T) {
 }
 
 func TestRuntimeSaveDirRejectsMissingDirectory(t *testing.T) {
+	silenceExpectedLogs(t)
 	setupMonitorPipelineTestGraph()
 	existing := t.TempDir()
 	missing := filepath.Join(t.TempDir(), "missing")

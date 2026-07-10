@@ -121,13 +121,13 @@ func TestWriteConfigPreservesAlertCommentsAndReplacesBoundsIndependently(t *test
 	}
 }
 
-func TestWriteConfigQuotesAlertMatcherNamesWithSpaces(t *testing.T) {
+func TestWriteConfigQuotesAlertMatcherNamesRequiringQuotes(t *testing.T) {
 	setupMonitorPipelineTestGraph()
-	add := invokeInlineCommand(`!!! add "My Bot"`)
+	add := invokeInlineCommand(`!!! add "My#Bot"`)
 	if add.Status != InlineCommandStatusApplied {
 		t.Fatalf("add status = %q, want applied: %#v", add.Status, add.Result)
 	}
-	alert := invokeInlineCommand(`!!! alert "My Bot" above 5`)
+	alert := invokeInlineCommand(`!!! alert "My#Bot" above 5`)
 	if alert.Status != InlineCommandStatusApplied {
 		t.Fatalf("alert status = %q, want applied: %#v", alert.Status, alert.Result)
 	}
@@ -138,13 +138,13 @@ func TestWriteConfigQuotesAlertMatcherNamesWithSpaces(t *testing.T) {
 	}
 	out := buf.String()
 
-	if !strings.Contains(out, `!!! alert "My Bot" above 5`+"\n") {
-		t.Fatalf("config did not quote spaced matcher alert:\n%s", out)
+	if !strings.Contains(out, `!!! alert "My#Bot" above 5`+"\n") {
+		t.Fatalf("config did not quote matcher alert:\n%s", out)
 	}
 
 	setupMonitorPipelineTestGraph()
-	invokeInlineCommand(`!!! add "My Bot"`)
-	reloaded := invokeInlineCommand(`!!! alert 'My Bot' above 5`)
+	invokeInlineCommand(`!!! add "My#Bot"`)
+	reloaded := invokeInlineCommand(`!!! alert 'My#Bot' above 5`)
 	if reloaded.Status != InlineCommandStatusApplied {
 		t.Fatalf("quoted alert reload status = %q, want applied: %#v", reloaded.Status, reloaded.Result)
 	}

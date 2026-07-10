@@ -10,8 +10,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Inline commands are PattyGraph's shared configuration and control language.
@@ -48,6 +50,14 @@ func inlineCommandRejected(commandName string, action string, message string) In
 	return result
 }
 
+func inlineCommandInvalidArgument(commandName, action, argument, value, message string) InlineCommandResult {
+	result := inlineCommandRejected(commandName, action, message)
+	result.Result["error_kind"] = "invalid_argument"
+	result.Result["argument"] = argument
+	result.Result["value"] = value
+	return result
+}
+
 type InlineCommandOptions struct {
 	allowCreateSaveDir bool
 }
@@ -75,6 +85,9 @@ func inlineAddPatterns(args []string, start int) []string {
 	return inlineArgsBeforeComment(args[start:])
 }
 
+// inlineArgsBeforeComment applies the inline language's trailing-comment rule
+// to an already tokenized argument tail. Callers must first consume required
+// values that may legally begin with '#', notably hexadecimal matcher colors.
 func inlineArgsBeforeComment(args []string) []string {
 	out := []string{}
 	for _, arg := range args {
@@ -107,6 +120,56 @@ func inlineBoolValue(value string) (string, bool) {
 	}
 }
 
+func validateInlineSettingArgument(name, value string) string {
+	switch strings.ToLower(name) {
+	case "push":
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return "push requires an integer"
+		}
+		if parsed < 0 || parsed > 11 {
+			return "push must be between 0 and 11"
+		}
+	case "grace":
+		if _, err := strconv.Atoi(value); err != nil {
+			return "grace requires an integer"
+		}
+	case "flux":
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return "flux requires an integer"
+		}
+		if parsed < 1 || parsed > 10 {
+			return "flux must be between 1 and 10"
+		}
+	case "scale":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return "scale requires a number"
+		}
+		if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return "scale must be a finite number"
+		}
+	case "read":
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return "read requires an integer"
+		}
+		if parsed < 0 {
+			return "read must be zero or greater"
+		}
+	case "color-index":
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return "color-index requires an integer"
+		}
+		if parsed < 0 || parsed >= len(AutobotColors) {
+			return fmt.Sprintf("color-index must be between 0 and %d", len(AutobotColors)-1)
+		}
+	}
+	return ""
+}
+
 // invokeInlineCommand applies one command after its source has already been
 // accepted as command input. Runtime callers that can overlap the tailer, TUI,
 // or control file monitor must hold mu before invoking it; startup config replay
@@ -118,6 +181,12 @@ func invokeInlineCommand(line string) InlineCommandResult {
 func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) InlineCommandResult {
 	// Assume '!!! ' prefix already detected
 	commandLine := line[4:]
+	// Inline commands share dispatch but intentionally own their argument grammar:
+	// strings.Fields identifies the command and supports hard-stop commands such as
+	// del and purge; quote-aware commands use splitArgsShellStyle; callers opt into
+	// trailing '#' comments after consuming any required hash-prefixed values. Mode
+	// and color enforce fixed arity, while property and no-argument commands stop
+	// processing once their documented inputs are satisfied.
 	tokens := strings.Fields(commandLine)
 	if len(tokens) == 0 {
 		return inlineCommandResult("", InlineCommandStatusIgnored, "empty")
@@ -128,7 +197,8 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 	switch cmd {
 	// === Matchers Management ===
 	case "ADD", "add":
-		// Parse command logLine with quote handling
+		// add uses quote-aware parsing because patterns may contain spaces; scope
+		// flags are accepted before or after the one-token matcher name.
 		args, err := splitArgsShellStyle(commandLine[len(cmd):])
 		if err != nil || len(args) < 1 {
 			return inlineCommandRejected(cmd, "add_matcher", "missing matcher name")
@@ -184,6 +254,12 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			result.Result["normalized_matcher_name"] = name
 			return result
 		}
+		if strings.IndexFunc(name, unicode.IsSpace) >= 0 {
+			result := inlineCommandInvalidArgument(cmd, "add_matcher", "matcher_name", name, "matcher name cannot contain whitespace")
+			result.Result["raw_matcher_name"] = originalName
+			result.Result["normalized_matcher_name"] = name
+			return result
+		}
 		if name == BotsMatcherName {
 			toggleBotsMatcher(false)
 			result := inlineCommandResult(cmd, InlineCommandStatusApplied, "enable_bots_auto_add")
@@ -209,7 +285,19 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			} else if name == "Platform" && len(patterns) == 0 {
 				newM = newRegexMatcher(name, platformRegexString)
 			} else {
-				newM = newRegexMatcher(name, strings.Join(patterns, " "))
+				pattern := strings.Join(patterns, " ")
+				if _, err := regexp.Compile(pattern); err != nil {
+					result := inlineCommandInvalidArgument(
+						cmd,
+						"add_matcher",
+						"regex",
+						pattern,
+						fmt.Sprintf("invalid regex pattern: %v", err),
+					)
+					result.Result["matcher_name"] = name
+					return result
+				}
+				newM = newRegexMatcher(name, pattern)
 			}
 		} else {
 			switch scopeName {
@@ -313,10 +401,9 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		}
 		fromTop := true
 		name := tokens[1]
-		// being nice for users doing a quick edit at the cli
-		// add +Matcher ...
-		// del +Matcher ....
-		// they can just edit the action and leave the additional info on or off
+		// del intentionally consumes only the matcher token. This lets an operator
+		// turn an add declaration into a delete by changing the command word while
+		// leaving placement and pattern text in place.
 		if name[0:1] == "*" {
 			name = name[1:]
 		}
@@ -373,12 +460,10 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		}
 		newMode, e := strconv.Atoi(args[1])
 		if e != nil {
-			return inlineCommandRejected(cmd, "set_matcher_mode", "invalid mode")
+			return inlineCommandInvalidArgument(cmd, "set_matcher_mode", "mode", args[1], "mode requires an integer")
 		}
-		// being nice for users doing a quick edit at the cli
-		// add +Matcher ...
-		// del +Matcher ....
-		// they can just edit the action and leave the additional info on or off
+		// Placement prefixes are accepted on matcher-management commands so a
+		// copied add declaration can be edited without first cleaning its name.
 		if name[0:1] == "*" {
 			name = name[1:]
 		}
@@ -388,7 +473,7 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			name = name[1:]
 		}
 		if newMode < 0 || newMode > 2 {
-			result := inlineCommandRejected(cmd, "set_matcher_mode", "invalid mode")
+			result := inlineCommandInvalidArgument(cmd, "set_matcher_mode", "mode", args[1], "mode must be between 0 and 2")
 			result.Result["matcher_name"] = name
 			result.Result["mode"] = newMode
 			return result
@@ -406,12 +491,31 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		return result
 
 	case "COLOR", "color":
-		if len(tokens) < 3 {
+		args, err := splitArgsShellStyle(commandLine[len(cmd):])
+		if err != nil {
+			return inlineCommandInvalidArgument(cmd, "set_matcher_color", "arguments", strings.TrimSpace(commandLine[len(cmd):]), err.Error())
+		}
+		if len(args) < 2 {
 			log.Printf("Invalid SET_COLOR usage: %s", commandLine)
 			return inlineCommandRejected(cmd, "set_matcher_color", "missing matcher name or color")
 		}
-		name := tokens[1]
-		color := tokens[2]
+		// The color itself may be an unquoted #RRGGBB value. Apply comment
+		// handling only to tokens after the required name and color.
+		extraArgs := inlineArgsBeforeComment(args[2:])
+		if len(extraArgs) > 0 {
+			result := inlineCommandInvalidArgument(
+				cmd,
+				"set_matcher_color",
+				"extra_args",
+				strings.Join(extraArgs, " "),
+				"color accepts a matcher name and one color",
+			)
+			result.Result["matcher_name"] = normalizeMatcherCommandName(args[0])
+			result.Result["extra_args"] = extraArgs
+			return result
+		}
+		name := args[0]
+		color := args[1]
 		cleanName := normalizeMatcherCommandName(name)
 		if !matcherNameExists(cleanName) {
 			result := inlineCommandRejected(cmd, "set_matcher_color", "matcher not found")
@@ -421,7 +525,13 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		}
 		if newIndex, err := strconv.Atoi(color); err == nil {
 			if newIndex < 0 || newIndex >= len(AutobotColors) {
-				result := inlineCommandRejected(cmd, "set_matcher_color", "invalid color index")
+				result := inlineCommandInvalidArgument(
+					cmd,
+					"set_matcher_color",
+					"color",
+					color,
+					fmt.Sprintf("color index must be between 0 and %d", len(AutobotColors)-1),
+				)
 				result.Result["matcher_name"] = cleanName
 				result.Result["color"] = color
 				return result
@@ -501,15 +611,15 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		}
 		normalizedValue, ok := inlineBoolValue(value)
 		if !ok {
-			result := inlineCommandRejected(cmd, "set_control_file_enabled", "invalid boolean value")
-			result.Result["value"] = value
-			return result
+			return inlineCommandInvalidArgument(cmd, "set_control_file_enabled", "control", value, "control requires a boolean value")
 		}
 		value = normalizedValue
 		SetFlagByName("control", value)
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_control_file_enabled")
 		result.Result["value"] = enableControlFile
 		return result
+	// No-argument actions intentionally hard-stop after command recognition;
+	// trailing text does not change or invalidate the requested action.
 	case "purge", "PURGE":
 		// TODO: can take optional matcher name
 		purgePeakWordCommand()
@@ -527,13 +637,23 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		dumpConfig()
 		return inlineCommandResult(cmd, InlineCommandStatusApplied, "write_config")
 	default:
-		// === Property Settings (single arg) ===
+		// Property settings consume one quote-aware value and intentionally stop;
+		// each setting validates that value before SetFlagByName applies it.
 		if len(tokens) < 2 {
 			log.Printf("Missing value for property %s", cmd)
 			return inlineCommandRejected(cmd, "set_flag", "missing value")
 		}
-		args, _ := splitArgsShellStyle(commandLine[len(cmd):])
+		args, err := splitArgsShellStyle(commandLine[len(cmd):])
+		if err != nil {
+			return inlineCommandInvalidArgument(cmd, "set_flag", strings.ToLower(cmd), strings.TrimSpace(commandLine[len(cmd):]), err.Error())
+		}
+		if len(args) == 0 {
+			return inlineCommandInvalidArgument(cmd, "set_flag", strings.ToLower(cmd), "", strings.ToLower(cmd)+" requires a value")
+		}
 		value := args[0]
+		if message := validateInlineSettingArgument(cmd, value); message != "" {
+			return inlineCommandInvalidArgument(cmd, "set_flag", strings.ToLower(cmd), value, message)
+		}
 		if strings.EqualFold(cmd, "save-dir") {
 			expanded := expandUser(value)
 			if opts.allowCreateSaveDir {
@@ -573,10 +693,7 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		if strings.EqualFold(cmd, "json") || strings.EqualFold(cmd, "control") {
 			normalizedValue, ok := inlineBoolValue(value)
 			if !ok {
-				result := inlineCommandRejected(cmd, "set_flag", "invalid boolean value")
-				result.Result["name"] = strings.ToLower(cmd)
-				result.Result["value"] = value
-				return result
+				return inlineCommandInvalidArgument(cmd, "set_flag", strings.ToLower(cmd), value, strings.ToLower(cmd)+" requires a boolean value")
 			}
 			value = normalizedValue
 		}
