@@ -97,10 +97,10 @@ Run (defaults to `./access.log` if no file is given):
 Helpful sub-help:
 
 ```bash
-./pattyGraph --help
-./pattyGraph --help layout
+./pattyGraph --help ai
 ./pattyGraph --help inline
-./pattyGraph --help colors
+./pattyGraph --help jsonl
+./pattyGraph --help layout
 ```
 
 ## Visual Diagnosis
