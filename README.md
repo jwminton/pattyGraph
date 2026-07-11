@@ -32,14 +32,6 @@ PattyGraph is a terminal-based, real-time access log analyzer for nginx-style lo
 
 It’s designed for live ops use (tmux/screen) and forensics (replaying historical log windows), with a dense interactive display that helps you see traffic **shape** and how it changes over time.
 
-
-## Download
-
-Prebuilt Linux binaries are available from the PattyGraph 0.1.6 release page:
-
-- [pattyGraph v0.1.6 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.6)
-
-
 ## Features
 
 - **Live traffic dashboard**: sparklines + interval-based stats over a rolling window
@@ -70,9 +62,13 @@ PattyGraph can give it the shape of the traffic first. Then the AI can decide wh
 
 ## Quick Start
 
-Download prebuilt binaries:
+Download
 
-(See 'Download' section above)
+Prebuilt Linux binaries are available from the PattyGraph 0.1.6 release page:
+
+- [pattyGraph v0.1.6 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.6)
+
+
 
 Standard go build:
 
