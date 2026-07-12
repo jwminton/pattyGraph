@@ -1,224 +1,460 @@
 # PattyGraph
-Stop dumping raw server logs into expensive LLMs. Let an AI agent read a compressed JSONL sidecar while you watch the live TUI dashboard
-![PattyGraph terminal UI](docs/images/pattyGraph-startup.gif)
 
-## Startup Speed (aka: 'Instant On')
-PattyGraph is designed to become useful almost immediately.
+**See the traffic shape before you search the traffic.**
 
-On a typical development machine, PattyGraph can read and summarize about 80 MB of existing NGINX access log in roughly a second which is typically around 200K log lines. This is pattyGraph consuming that data as though it was live at its fastest full processing speed minus the TUI updates. This isn't a crippled startup mode. Once started, the TUI and PattyLog have the recent context to show traffic shape before live tailing takes over, as though pattytGraph had been running the whole time. A fully operational view starting from zero to ready in one second.
+Raw access logs explain a site one request at a time. PattyGraph shows what the
+traffic is becoming: which bot or source is winning, which paths and referrers
+are rising, where errors are clustering, and which patterns deserve a closer
+look.
 
-## New in PattyGraph
+PattyGraph is a live NGINX access-log instrument for the operational space
+between `tail -f` and a full ingestion stack. It builds a compact, stateful view
+directly from the log already on disk, presents that view in an interactive TUI,
+and can publish the same running model as structured PattyLog JSONL for scripts,
+automation, and AI agents.
 
-pattyGraph has expanded to express a more complete operational loop: observe, control, record, and alert.
+![PattyGraph live TUI with matcher sparklines and ranked traffic context](docs/images/pattyGraph-startup.gif)
 
-- `--help ai` documents the intended AI-assisted operation workflow for agents,
-  automation, and human operators.
-- Recommended assisted sessions run PattyGraph under tmux with PattyLog JSONL
-  enabled through `--json`.
-- `--control` and `pattyControl.log` provide a live command path for inline
-  commands.
-- Matcher alerts watch for counts above or below configured thresholds.
-- Alert configuration is persisted through config output so tuned thresholds can
-  be replayed or restored.
-- Individual Alert comments are preserved with the alert creation: <br>`!!! alert health below 20   # Missing health checks?`
+**Jump to:** [Run it](#run-it) ·
+[Read the screen](#what-the-screen-is-showing) ·
+[Architecture](#the-architecture-behind-the-view) ·
+[Configuration](#configuration-is-a-replayable-command-stream) ·
+[Documentation](#documentation-by-question)
 
+## A Different First View Of Access Logs
 
-## Tell me more...
+PattyGraph turns a live log stream into operational evidence before anyone has
+to read the firehose.
 
-PattyGraph is a real-time terminal access-log analyzer for live ops, bot discovery, and traffic forensics. Pattygraph includes sidecar JSONL output, so the same run that drives the interactive TUI can also write structured interval records for scripts, replay workflows, and AI-assisted triage. Use the terminal view to see traffic shape as it happens, then use the sidecar stream to decide where to aim `rg`, `grep`, `awk`, or deeper raw-log inspection.
+"Instant on" also changes the tempo of investigation. On an ordinary development
+machine, PattyGraph can preload and summarize roughly 200,000 recent log lines in
+about a second before live tailing takes over. That startup speed
+practically eliminates the hesitation to take a look.
 
+It continuously answers questions such as:
 
-PattyGraph is a terminal-based, real-time access log analyzer for nginx-style logs. It highlights unusual or significant traffic patterns using sparklines, matchers, and ranked token/referrer/IP tables.
+- Which traffic class is dominating this interval?
+- Is bot-like traffic concentrated in one identity, one prefix, or many sources?
+- Are errors moving with a bot, an IP group, or a request path?
+- Did byte volume rise without a matching rise in request volume?
+- Which words, referrers, and IPs explain the current traffic shape?
+- Which retained source line best represents the pattern on screen?
+- What changed after an operator or agent added a matcher or alert?
 
-It’s designed for live ops use (tmux/screen) and forensics (replaying historical log windows), with a dense interactive display that helps you see traffic **shape** and how it changes over time.
+The raw log remains the source of truth. PattyGraph makes it practical to decide
+where the next `rg`, `grep`, `awk`, or forensic query should begin.
 
-## Features
+## Run It
 
-- **Live traffic dashboard**: sparklines + interval-based stats over a rolling window
-- **Matchers**: track known patterns and promoted sources (bots/scrapers/etc.)
-- **Token tracking**: interesting URI/User-Agent tokens, referrers, and IPs
-- **User-Agent analysis**:
-  - residue buckets (post-cleanup token-count signature)
-  - per-IP User-Agent drift (token-based distance)
-- **Interactive UI**: clickable sparklines, selectable matchers, cross-highlighting, per-entry history sparklines
-- **Inline commands** (`!!!`): runtime control and config injection through the log stream
-- **Timed replay support**: `cmd/timedReplay` replays logs with original timing shape for demos/testing/forensics
-
-## Live Terminal Triage, Now with JSONL Sidecar Output
-
-Let pattyGraph tell your AI tools where to start with your next NGINX log emergency!
-
-This release turns PattyGraph into something more than a live terminal viewer for NGINX-style access logs. It is now designed to be invoked by AI tools, scripts, and automation workflows as a first-pass log investigation layer.
-
-PattyGraph still runs as an interactive TUI for humans watching traffic in real time, but the new `-j` / `--json` mode writes a sidecar JSONL stream alongside it.
-
-That sidecar gives another AI or automation process structured interval records: active matchers, top IPs, interesting URI and user-agent tokens, refs, bot activity, error bursts, IP groups, traffic totals, and generated factoids.
-
-The practical goal is simple:
-
-An AI should not have to ingest an entire access log just to figure out what is happening.
-
-PattyGraph can give it the shape of the traffic first. Then the AI can decide what raw-log searches to run next, which IPs or paths deserve attention, whether bot activity is normal or suspicious, and where deeper investigation should begin.
-
-## Quick Start
-
-Download
-
-Prebuilt Linux binaries are available from the PattyGraph 0.1.6 release page:
-
-- [pattyGraph v0.1.6 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.6)
-
-
-
-Standard go build:
+PattyGraph defaults to `./access.log` when no path is supplied.
 
 ```bash
-go build
-```
-
-Build multiple distribution targets (writes into `dist/`):
-
-```bash
-./compile.sh
-```
-
-Run (defaults to `./access.log` if no file is given):
-
-```bash
-./pattyGraph
-# or
+go build -o pattyGraph .
 ./pattyGraph /var/log/nginx/access.log
 ```
 
-Helpful sub-help:
+For a stable machine-readable sidecar and control file under one directory:
 
 ```bash
-./pattyGraph --help ai
-./pattyGraph --help inline
-./pattyGraph --help jsonl
-./pattyGraph --help layout
+mkdir -p ./splats
+
+./pattyGraph \
+  --save-dir ./splats \
+  --json-file pattyLog.jsonl \
+  --control-file pattyControl.log \
+  /var/log/nginx/access.log
 ```
 
-## Visual Diagnosis
+Prebuilt Linux binaries are available from the
+[v0.1.6 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.6).
 
-![PattyGraph composite examples](docs/images/pattyGraph-states-2x2.png)
+Useful built-in references:
 
-At a glance, the scope and urgency of failures can be categorized. Looking left to right, top row first: 
-- **Normal Startup**: Maybe some errors but nothing persistent. No real pattern to the red error highlights
-- **Potentially bad clients**: More errors and there are some persistent IP's or IP ranges that are the source.
-- **Potentially bad deployment**: Errors are more related to the content being hit than the clients doing the requesting and the error spread may be wider, but upon investigation, common deployment characteristics can be seen
-- **Systemic error**: Service itself might be down or there is some fatal root error causing a system-wide issue
+```bash
+./pattyGraph --help
+./pattyGraph --help layout
+./pattyGraph --help inline
+./pattyGraph --help jsonl
+./pattyGraph --help ai
+./pattyGraph --help facts
+```
+
+Inside the TUI, `Ctrl-H` opens a compact reminder for keyboard and mouse
+controls.
+
+## What The Screen Is Showing
+
+The upper area is an ordered set of live matcher and system lanes. Each lane has
+current activity, recent movement, and up to an 80-interval sparkline history.
+
+```text
+promoted bot / IP / custom matcher lanes
+Bots
+lines
+bytes
+errs
+selected interesting-item history
+```
+
+The lower area explains those lanes:
+
+```text
+matcher detail | interesting words | referrers | IPs and prefix groups
+```
+
+Rows above `Bots` compete to claim a line for the bot-centric view. `Bots` is
+the broad fallback for unclaimed bot-like traffic. Rows below that boundary
+observe every parsed line and collect system totals, errors, request texture,
+referrers, IPs, and grouped source context.
+
+Selections connect the summary back to evidence. Click a matcher, sparkline
+interval, word, referrer, IP, or prefix group to expose retained history and a
+representative source line. `Tab` cycles the secondary lens through burstiness,
+recent flux, history depth, User-Agent movement, mini-sparklines, and bytes.
+
+See [Click Zones](docs/CLICK_ZONES.md),
+[Tab View Cycles](docs/TAB_VIEW_CYCLES.md), and
+[Selection Deep Dive](docs/SELECTION_DEEP_DIVE.md) for the full interaction
+model.
+
+## Read Traffic Shape, Not Just Totals
+
+![Four PattyGraph TUI states showing different error and source patterns](docs/images/pattyGraph-states-2x2.png)
+
+The same error count can describe very different incidents. PattyGraph keeps
+enough surrounding shape visible to distinguish patterns such as:
+
+| Screen shape | First interpretation |
+| --- | --- |
+| Scattered errors with no persistent source | Ordinary background failures or startup noise |
+| Errors moving with recurring IPs or prefixes | Client-driven probing, automation, or a concentrated source problem |
+| Errors moving with request words across many clients | Content, routing, or deployment behavior |
+| Broad errors rising with total traffic | A systemic service or dependency failure |
+
+These are investigation cues, not automated verdicts. The screen tells an
+operator which evidence should be inspected next.
 
 
-## timedReplay
+## One Live Model, Three Operating Surfaces
 
-`timedReplay` is a small companion utility that replays captured NGINX access
-logs with controlled timing, letting PattyGraph watch historical traffic as if
-it were arriving live.
+The TUI, PattyLog, and control file are different surfaces over one running
+traffic model.
 
-A typical replay session uses two shells. Start PattyGraph on an output log:
+```mermaid
+flowchart TD
+    Log[NGINX access log]
+    Preload[bounded recent preload]
+    Tail[live tail]
+    Model[stateful traffic model]
+    TUI[interactive TUI]
+    JSONL[PattyLog JSONL]
+    Alerts[alert transitions]
+    Control[pattyControl.log]
+
+    Log --> Preload
+    Log --> Tail
+    Preload --> Model
+    Tail --> Model
+    Control --> Model
+    Model --> TUI
+    Model --> JSONL
+    Model --> Alerts
+```
+
+### Human surface: the TUI
+
+Watch traffic move, compare lanes, inspect source shape, select retained
+evidence, and tune the session without leaving the terminal.
+
+### Machine surface: PattyLog JSONL
+
+PattyLog writes schema-versioned `session_start`, `interval`,
+`control_command`, and `alert` records. It carries matcher state, ranked
+interesting keys, IP groups, selected context, factoids, and alert transitions
+without reproducing the raw log.
+
+### Control surface: inline commands
+
+Configuration files, control-file input, and `!!!` lines injected into a
+watched log all use the same command language.
+
+```text
+!!! add bad-paths .php wslogin xmlrpc
+!!! add --ips checkout-sources 203.0.113.
+!!! alert errs above 50
+!!! add health /healthz
+!!! alert health below 1       # Missing health checks?
+!!! select --ips 203.0.113.
+!!! dumpConfig
+```
+
+With PattyLog enabled, control attempts and their structured results become part
+of the session record. A human, script, or agent can observe, act, and verify
+through the same local process.
+
+Read [PattyLog Schema Guide](docs/PATTYLOG_SCHEMA.md),
+[PattyLog Live Shape](docs/JSONL_DIAGRAM.md), and
+[Selection Markup and Context](docs/SELECTION_MARKUP.md) for the machine-facing
+contract.
+
+## The Architecture Behind The View
+
+PattyGraph is specialized rather than generic. Its internal architecture is
+shaped around sustained, line-rate observation of NGINX traffic.
+
+### Log lines behave like one-way requests
+
+Internally, PattyGraph is organized like a server whose requests are access-log
+lines. Each line is parsed once, passed through the running model, and allowed
+to update matchers, counters, retained keys, source examples, alerts, and
+history. There is no per-line response. The TUI and JSONL stream are
+asynchronous projections of accumulated state.
+
+That model keeps the hot path direct while several consumers share one coherent
+interpretation of the traffic.
+
+### The matcher list is a forward-only stack of sieves
+
+Every parsed line moves downward through an ordered pipeline. A stage may claim
+the line, attach matcher identity and color, remember an IP, or add observational
+context. Lower stages do not reach upward and revise earlier decisions.
+
+The `Bots` row is the visible boundary:
+
+```text
+above Bots: first-claim competition
+Bots:       broad bot-like fallback
+below Bots: shared observation
+```
+
+This ordering powers bot promotion, remembered-IP association, custom matcher
+placement, shared historical scaling, and the visible row layout. See
+[Matcher Pipeline and Bots Competition](docs/MATCHER_PIPELINE_BOTS_COMPETITION.md)
+and [Bot and Bot-Army Detection](docs/BOT_ARMY_DETECTION.md).
+
+### Interesting entries live under time pressure
+
+Every retained word, referrer, and IP has a compact lifecycle in WordStats. Every 
+retained key has a compact lifecycle in `WordStats`: current count, recent history, 
+source examples, bytes, matcher provenance, User-Agent state, and last-seen log time.
+
+The working set behaves like a small domain-specific garbage collector.
+Repetition and recency reinforce an entry; shallow one-off observations age out;
+stable or operationally important entries can become Peak and remain visible.
+The result is close to grep with a sliding window, memory, and collection
+pressure.
+
+`--push`, `--scale`, and `--grace` shape that pressure. Read
+[Time Pressure](docs/TIME_PRESSURE.md) for the full model.
+
+### Traffic texture survives reduction
+
+PattyGraph preserves several kinds of shape that disappear in flat totals:
+
+- promoted bot lanes and remembered source IPs
+- request, referrer, and IP histories
+- active IP-prefix groups
+- line, byte, response-code, and User-Agent token bands
+- source examples from first seen, first interval, and last seen
+- per-IP User-Agent token movement
+- reduced User-Agent bucket residue
+- matcher alert streaks and transitions
+
+Two of the more unusual signals are documented in
+[Levenshtein Distance](docs/LEVENSHTEIN_DISTANCE.md) and
+[User-Agent Bucket Residue](docs/USER_AGENT_BUCKET_RESIDUE.md).
+
+## Fast Enough For The Emergency, Light Enough For The SSH Session
+
+PattyGraph is designed to become useful immediately without introducing a new
+observability stack during an incident.
+
+On an ordinary development machine, a recent 80 MB window, often around 200,000
+NGINX lines, can be parsed into full matcher, history, ranking, and PattyLog
+state in roughly one second. Live tailing then continues from that populated
+model. Startup is normal processing with screen refresh deferred, not a reduced
+analysis mode.
+
+The same design supports long-running use in `tmux` or an SSH session:
+
+- bounded recent preload through `--read`
+- compact 80-interval histories
+- pooled `WordStats` and reusable buffers
+- string interning and allocation-aware parsing
+- no database, collector, web server, or log shipper requirement
+- no regex engine in the common line-processing path
+- optional regex matchers when a specialized case calls for one
+- built-in memory, GC, allocation, and reuse factoids
+
+Read [Startup Speed](docs/STARTUP_SPEED.md) and
+[Lightweight Observer](docs/LIGHTWEIGHT_OBSERVER.md) for the operational and
+resource goals.
+
+## Bot And Bot-Army Visibility
+
+The built-in `Bots` matcher watches broad bot-like User-Agent traffic. When one
+identity becomes dominant, PattyGraph can promote it into a dedicated lane above
+`Bots`, preserving the remaining aggregate as its own signal.
+
+Pattern matchers can also remember source IPs during a session. Once a promoted
+matcher associates an IP with a bot identity, later traffic from that source can
+remain attached to the same lane even when each request is not cleanly labeled.
+This is live association, not identity verification.
+
+Read the promoted lanes together with request words, errors, individual IPs,
+prefix groups, User-Agent movement, and residue bands. Distributed automation
+often keeps individual IP usage looking ordinary while failing to preserve the
+site's usual traffic texture.
+
+PattyGraph surfaces that difference while the traffic is still moving. It does
+not claim intent, authenticate crawlers, or replace WAF and network evidence.
+
+## Configuration Is A Replayable Command Stream
+
+PattyGraph configuration is plain text composed of the same inline commands used
+during a live session.
+
+```text
+# pattyGraph.conf
+
+!!! title prod-edge
+!!! save-dir ./splats
+!!! json-file pattyLog.jsonl
+!!! control-file pattyControl.log
+
+!!! push 5
+!!! scale 1.0
+!!! grace 20
+
+!!! add Googlebot
+!!! mode Googlebot 1
+
+!!! add bad-paths .php wslogin xmlrpc
+!!! color bad-paths red
+!!! alert bad-paths above 10
+```
+
+Run it:
+
+```bash
+./pattyGraph --config pattyGraph.conf /var/log/nginx/access.log
+```
+
+Save the current session configuration with `Ctrl-G` or:
+
+```text
+!!! dumpConfig
+```
+
+This makes a tuned investigation portable across a live log, a forensic replay,
+or another server with the same traffic vocabulary.
+
+## Replay Historical Traffic As A Live Stream
+
+`timedReplay` is a companion development and forensic utility under
+`cmd/timedReplay`. It groups captured lines by their NGINX timestamp second and
+replays each group with the original second-level burst shape.
 
 ```bash
 touch replayed_access.log
 ./pattyGraph replayed_access.log
 ```
 
-Then append replayed traffic from another shell:
+In another shell:
 
 ```bash
-go run ./cmd/timedReplay -file ./access.1.log >> ./replayed_access.log
+go run ./cmd/timedReplay \
+  -file ./access.1.log \
+  -out ./replayed_access.log
 ```
 
-`timedReplay` groups lines by their NGINX timestamp second, preserving bursts
-from the original capture.
+Use `cmd/timedReplay/log_split.sh` to create a realistic startup seed and replay
+segment from a larger capture. See [timedReplay](cmd/timedReplay/README.md) for
+the complete workflow.
 
-For larger investigations, `cmd/timedReplay/log_split.sh` can split a capture
-into a seed file and replay file. See `cmd/timedReplay/README.md` for the full
-workflow.
+## Documentation By Question
 
+### Why does this tool exist?
 
-## Inline Commands
+- [Signal First](docs/SIGNAL_FIRST.md)
+- [Lightweight Observer](docs/LIGHTWEIGHT_OBSERVER.md)
+- [Startup Speed](docs/STARTUP_SPEED.md)
 
-Lines beginning with `!!!` are interpreted as commands rather than log lines. This is used for runtime control and for configuration files (a config file is just a sequence of inline commands). 
+### How does traffic become visible signal?
 
-Example:
+- [Matcher Pipeline and Bots Competition](docs/MATCHER_PIPELINE_BOTS_COMPETITION.md)
+- [Time Pressure](docs/TIME_PRESSURE.md)
+- [Bot and Bot-Army Detection](docs/BOT_ARMY_DETECTION.md)
+- [User-Agent Bucket Residue](docs/USER_AGENT_BUCKET_RESIDUE.md)
+- [Levenshtein Distance](docs/LEVENSHTEIN_DISTANCE.md)
 
-Adds a new Matcher looking for the simple text "Applebot" in any part of the log line.
+### How do I operate the TUI?
+
+- [Click Zones](docs/CLICK_ZONES.md)
+- [Tab View Cycles](docs/TAB_VIEW_CYCLES.md)
+- [Selection Deep Dive](docs/SELECTION_DEEP_DIVE.md)
+
+### How do tools consume the same session?
+
+- [PattyLog Schema Guide](docs/PATTYLOG_SCHEMA.md)
+- [PattyLog Live Shape](docs/JSONL_DIAGRAM.md)
+- [Selection Markup and Context](docs/SELECTION_MARKUP.md)
+
+## For Developers Reading The Source
+
+PattyGraph is a Go terminal tool, not a reusable parsing library. One shared
+`Monitor` keeps matcher order, TUI selection, retained history, control commands,
+alerts, and sidecar snapshots aligned. Some package-level access is intentional
+for hot-path simplicity and predictable operation.
+
+| Start here | Responsibility |
+| --- | --- |
+| `main.go` | Startup passes, process model, preload, and runtime planes |
+| `monitor.go` | Shared Monitor, parsed line state, matcher pipeline, and control-file tailing |
+| `parser.go` | Allocation-conscious NGINX line parsing |
+| `matcher.go` | Matcher behavior, Bots, promotion, and remembered IPs |
+| `wordmatcher.go` | Interesting words, referrers, IPs, ranking, grouping, and display |
+| `wordstats.go` | Per-key lifecycle, histories, retained sources, and pooling |
+| `tui.go` | Rendering, keyboard controls, and coordinate-based click zones |
+| `factoid.go` | Named observations, ticker output, quick help, and panel modes |
+| `inline_command.go` | Shared config and live-control command language |
+| `sidecar.go` | PattyLog schema and JSONL serialization |
+
+The direct dependency surface is intentionally small: `tview`/`tcell`, `tail`,
+and `pflag` are the core external pieces.
 
 ```bash
-echo '!!! add Applebot' >> access.log
+go test ./...
+go vet ./...
 ```
 
-See:
+Successful tests are silent on stdout and stderr.
 
-```bash
-./pattyGraph --help inline
-```
+## Scope And Trust
 
-## Configuration files
+PattyGraph is intentionally optimized for standard NGINX access-log structure
+and nearby variants. It is a local observer and investigation aid, not a WAF,
+authentication system, packet analyzer, general log parser, or replacement for
+raw evidence.
 
-PattyGraph configuration files are plain text. They use the same `!!!` inline command format accepted during live operation, but are read before log ingestion starts. That means an investigation can become repeatable: tune matchers during a live session, save the setup, then reuse it later against the same log, a replay file, or a new production stream.
+The repository does not distribute real access-log data. Use logs you own,
+administer, or are authorized to inspect.
 
-Example:
+The code is compact enough to review from source, and `go.mod` exposes the small
+dependency set directly. Operators with strict trust requirements can inspect
+and build the binary locally.
 
-```text
-# pattyGraph.conf
+## Support The Project
 
-!!! title prod-nginx
-!!! save-dir ./splats
+PattyGraph is an independent tool built from sustained production traffic
+observation. If it fills a gap in your operational workflow:
 
-# Tuning controls
-!!! push 5
-!!! scale 1.0
-!!! grace 15
-
-# Matchers
-!!! add Googlebot
-!!! color Googlebot green
-!!! mode Googlebot 1
-
-!!! add BadPaths .php wp-login xmlrpc
-!!! color BadPath red
-!!! alert BadPath above 10
-```
-
-Run with a saved configuration:
-
-```bash
-./pattyGraph --config pattyGraph.conf /path/to/access.log
-```
-
-Save the current matcher setup from a live session with `Ctrl-G` or the inline command:
-
-```text
-!!! dumpConfig
-```
-
-Generated config snapshots are written as timestamped `pattyGraph_<date>_<time>_<pid>.conf` files under the configured save directory.
-
-
-## Documentation
-(Planned and existing)
-
-* [How To: Bots and Bot Army Detection](./docs/BOT_ARMY_DETECTION.md)
-* [From Match to Signal: Time Pressure in PattyGraph](./docs/TIME_PRESSURE.md)
-* [Startup Speed aka:"Instant On"](./docs/STARTUP_SPEED.md)
-* [The Lightweight Observer](./docs/LIGHTWEIGHT_OBSERVER.md)
-* [PattyLog JSONL: Live Shape](./docs/JSONL_DIAGRAM.md)
-* [TUI Tab view cycle](./docs/TAB_VIEW_CYCLES.md)
-* [Tokenized User-Agent Levenshtein Distance](./docs/LEVENSHTEIN_DISTANCE.md)
-* [TUI Mouse Interaction and Click Zones](./docs/CLICK_ZONES.md)
-* [Selection Deep Dive](./docs/SELECTION_DEEP_DIVE.md)
-* Traffic texture model: `docs/traffic-texture.md`
-* User-Agent residue buckets: `docs/user-agent-residue-profiling.md`
-* Architecture notes: `docs/architecture.md`
-
-## Sample Data Policy
-
-This repository does **not** distribute real access log data. Use logs you own/administer/are authorized to inspect. Screenshots may be taken from authorized or public datasets, but raw logs are not hosted in the repo.
+- star the repository so other operators can find it
+- share screen patterns or questions in
+  [GitHub Discussions](https://github.com/jwminton/pattyGraph/discussions)
+- report reproducible issues with the traffic shape and configuration involved
+- support continued development through the repository’s Sponsor links
 
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
-
-```
