@@ -9,7 +9,7 @@ PattyGraph is a live NGINX access-log instrument for the operational space betwe
 It builds a compact, stateful view directly from the log already on disk, presents that view in an interactive TUI, and
 publishes the same running model as structured PattyLog JSONL for scripts, automation, and AI agents.
 
-**Agentic operation** is expected with built in control surfaces and documented by the binary itself:
+**Agentic operation** is expected, built in control surfaces and documented by the binary itself:
 ```bash
 ./pattyGraph --help ai
 ```
