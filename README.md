@@ -9,7 +9,7 @@ PattyGraph is a live NGINX access-log instrument for the operational space betwe
 It builds a compact, stateful view directly from the log already on disk, presents that view in an interactive TUI, and
 publishes the same running model as structured PattyLog JSONL for scripts, automation, and AI agents.
 
-**Agentic operation** is expected, built in control surfaces and documented by the binary itself:
+**Agentic operation** is expected with built-in control surfaces and guidance documented by the binary itself:
 ```bash
 ./pattyGraph --help ai
 ```
@@ -238,8 +238,8 @@ and [Bot and Bot-Army Detection](docs/BOT_ARMY_DETECTION.md).
 
 ### Interesting entries live under time pressure
 
-Every retained word, referrer, and IP has a compact lifecycle in WordStats. Every 
-retained key has a compact lifecycle in `WordStats`: current count, recent history, 
+Every retained word, referrer, and IP has a compact lifecycle in `WordStats`:
+current count, recent history,
 source examples, bytes, matcher provenance, User-Agent state, and last-seen log time.
 
 The working set behaves like a small domain-specific garbage collector.
