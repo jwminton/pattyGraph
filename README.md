@@ -1,17 +1,21 @@
 # PattyGraph
 
-**See the traffic shape before you search the traffic.**
+## See the traffic shape before you search the traffic.
 
-Raw access logs explain a site one request at a time. PattyGraph shows what the
-traffic is becoming: which bot or source is winning, which paths and referrers
-are rising, where errors are clustering, and which patterns deserve a closer
-look.
+Raw access logs explain a site one request at a time. PattyGraph shows what the traffic is becoming: which bot or source
+is winning, which paths and referrers are rising, where errors are clustering, and which patterns deserve a closer look.
 
-PattyGraph is a live NGINX access-log instrument for the operational space
-between `tail -f` and a full ingestion stack. It builds a compact, stateful view
-directly from the log already on disk, presents that view in an interactive TUI,
-and can publish the same running model as structured PattyLog JSONL for scripts,
-automation, and AI agents.
+PattyGraph is a live NGINX access-log instrument for the operational space between `tail -f` and a full ingestion stack.
+It builds a compact, stateful view directly from the log already on disk, presents that view in an interactive TUI, and
+publishes the same running model as structured PattyLog JSONL for scripts, automation, and AI agents.
+
+**Agentic operation** is expected with built in control surfaces and documented by the binary itself:
+```bash
+./pattyGraph --help ai
+```
+The embedded guide shows an agent how to join a `tmux` session, read PattyLog, issue matcher, selection, alert, and
+configuration commands, save evidence, and verify the results through the same shared traffic model used by human
+operators.
 
 ![PattyGraph live TUI with matcher sparklines and ranked traffic context](docs/images/pattyGraph-startup.gif)
 
