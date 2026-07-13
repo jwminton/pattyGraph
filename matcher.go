@@ -603,6 +603,13 @@ func (m *Matcher) expandGlyph() string {
 	}
 }
 
+// cycleDisplayMatchMode advances the matcher detail shown in the lower-left
+// panel. The expansion glyph reflects the resulting zero, one, or two levels.
+func (m *Matcher) cycleDisplayMatchMode() {
+	m.displayMatchMode = (m.displayMatchMode + 1) % 3
+	m.displayMatchedCache = ""
+}
+
 // displayMatched returns a formatted string of all unique matched entries and their counts,
 // sorted by intervalCount in descending order and alphabetically by match for ties.
 func (m *Matcher) displayMatched() string {

@@ -259,8 +259,8 @@ func setUIHook() {
 			sHeight := PattyGraph.sparkPanelHeight()
 			hasControlKey := event.Modifiers()&tcell.ModCtrl != 0
 			x, y := event.Position()
-			//PattyGraph.selectedGraphPosition = fmt.Sprintf("%d:%d", x, y)
-			// spark graph click
+			// This offset belongs only to the sparkgraph panel. Lower panels apply
+			// their own scroll offsets before translating a click into a row.
 			offset, _ := PattyGraph.sparklineHistoryView.GetScrollOffset()
 			if x > PattyPrintWidth || y < (2-offset) {
 				return event, action
@@ -271,23 +271,16 @@ func setUIHook() {
 				index := y - 2
 				matcherCount := mLen - 3
 				index += offset
-				// matcher & ticker selection management
+				// Matcher labels toggle selection. Matcher sparklines retain selection
+				// because the same click also inspects a retained interval.
 				if index < matcherCount {
-					newM := PattyGraph.matchers[index].asMatcher()
-					if PattyGraph.selectedMatcher == newM && x < 20 {
-						if hasControlKey {
-							//newM.displayMatchZero = !newM.displayMatchZero
-							newM.displayMatchMode = (newM.displayMatchMode + 1) % 3
-							newM.displayMatchedCache = ""
-						} else {
-							PattyGraph.setSelectedMatcher(nil)
-						}
+					clickedMatcher := PattyGraph.matchers[index].asMatcher()
+					if x < 20 {
+						PattyGraph.handleMatcherSelectionGesture(clickedMatcher, hasControlKey)
 					} else {
-						PattyGraph.setSelectedMatcher(newM)
+						PattyGraph.setSelectedMatcher(clickedMatcher)
 						if hasControlKey {
-							//newM.displayMatchZero = !newM.displayMatchZero
-							newM.displayMatchMode = (newM.displayMatchMode + 1) % 3
-							newM.displayMatchedCache = ""
+							clickedMatcher.cycleDisplayMatchMode()
 						}
 					}
 				} else if PattyGraph.showTicker &&
@@ -301,9 +294,8 @@ func setUIHook() {
 					}
 				}
 
-				//// selected interesting sparkline value selection
+				// Selected interesting sparkline value selection.
 				if y == mLen-1 && PattyGraph.selectedInterestingMatcher != nil {
-					//m.setSelectedMatcher(nil)
 					if x >= 20 && x < PattyPrintWidth {
 						idx := x - 20
 						PattyGraph.selectedGraphValue = PattyGraph.selectedInterestingMatcher.selectedHistoryAt(idx)
@@ -342,53 +334,21 @@ func setUIHook() {
 					} else {
 						// out of bounds catchall
 						PattyGraph.selectedGraphValue = -1
-						//pushPrintNow("bounds checker")
 					}
 				}
 				return nil, action
-				//} else if  {
-				//
 			} else {
 				// below the spark graph. One of the four columns should take "focus" and translate the click to a
 				// selection. Interesting columns only look for/print the selectionKey if they have focus
 				if x <= botsDisplayWidth {
 					if bottomPanelCurrent == bottomPanelMatchers {
 						// MATCHERS Column
+						// The matcher panel owns this offset. matcherAtDetailRow
+						// receives the already-normalized logical row.
 						offset, _ := PattyGraph.botMatchesView.GetScrollOffset()
 						index := y - PattyGraph.sparkPanelHeight() + offset
-						slide := 0 // simulated indexing to make it "chunkier"  (i.e. one matcher can == multiple lines)
-						for i, facade := range PattyGraph.matchers {
-							matcher := facade.asMatcher()
-							if matcher != nil {
-								//if matcher.name != "bytes" {
-								//if matcher.name != "lines" && matcher.name != "bytes" {
-								if index >= i+slide && index <= i+slide+matcher.matchedDisplayCount {
-									if PattyGraph.selectedMatcher == matcher {
-										if hasControlKey {
-											//matcher.displayMatchZero = !matcher.displayMatchZero
-											matcher.displayMatchMode = (matcher.displayMatchMode + 1) % 3
-											matcher.displayMatchedCache = ""
-										} else {
-											PattyGraph.setSelectedMatcher(nil)
-										}
-									} else {
-										PattyGraph.setSelectedMatcher(matcher)
-										if hasControlKey {
-											//matcher.displayMatchZero = !matcher.displayMatchZero
-											matcher.displayMatchMode = (matcher.displayMatchMode + 1) % 3
-											matcher.displayMatchedCache = ""
-										}
-									}
-									break
-								}
-								//autoMatcher.toggleSelection(index >= i+slide && index <= i+slide+autoMatcher.matchedDisplayCount)
-								slide += matcher.matchedDisplayCount
-								//} else {
-								//	// lines and bytes get skipped and have to reset the sliding index
-								//	//autoMatcher.toggleSelection(false)
-								//	slide--
-								//}
-							}
+						if clickedMatcher := PattyGraph.matcherAtDetailRow(index); clickedMatcher != nil {
+							PattyGraph.handleMatcherSelectionGesture(clickedMatcher, hasControlKey)
 						}
 					}
 				} else if x < botsDisplayWidth+PattyGraph.wordsMatcher.displayWidth {
@@ -666,6 +626,49 @@ func (m *Monitor) setSelectedMatcher(matcher *Matcher) {
 	}
 	m.selectedMatcher = matcher // only mutator
 }
+
+// handleMatcherSelectionGesture applies the shared matcher-label and detail-row
+// click vocabulary. A normal click toggles selection; Ctrl-click retains or
+// establishes selection while cycling the amount of matcher detail displayed.
+func (m *Monitor) handleMatcherSelectionGesture(matcher *Matcher, cycleDetail bool) {
+	if matcher == nil {
+		return
+	}
+	if m.selectedMatcher == matcher {
+		if cycleDetail {
+			matcher.cycleDisplayMatchMode()
+		} else {
+			m.setSelectedMatcher(nil)
+		}
+		return
+	}
+
+	m.setSelectedMatcher(matcher)
+	if cycleDetail {
+		matcher.cycleDisplayMatchMode()
+	}
+}
+
+// matcherAtDetailRow translates a matcher-panel row, after that panel's scroll
+// offset has been applied, into the matcher whose header or expanded detail
+// occupies the row.
+func (m *Monitor) matcherAtDetailRow(row int) *Matcher {
+	expandedRows := 0
+	for facadeIndex, facade := range m.matchers {
+		matcher := facade.asMatcher()
+		if matcher == nil {
+			continue
+		}
+		firstRow := facadeIndex + expandedRows
+		lastRow := firstRow + matcher.matchedDisplayCount
+		if row >= firstRow && row <= lastRow {
+			return matcher
+		}
+		expandedRows += matcher.matchedDisplayCount
+	}
+	return nil
+}
+
 func (m *Monitor) createMatcher(newPattern string, startsWith bool, patterns []string) *Matcher {
 	var newM *Matcher
 	if startsWith {
