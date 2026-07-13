@@ -176,39 +176,81 @@ func TestMatcherPushResetsIntervalAndTrimsHistory(t *testing.T) {
 	}
 }
 
-func TestInsertMatcherHelpersPreserveLayering(t *testing.T) {
+func TestPlaceMatcherPreservesLayeringAndRefreshesOrderState(t *testing.T) {
 	bots := NewPredicateMatcher("Bots")
 	lines := NewPredicateMatcher("lines")
 	PattyGraph = &Monitor{
-		botsMatcher: bots,
-		matchers:    []MatcherFacade{bots, lines},
+		botsMatcher:  bots,
+		linesMatcher: lines,
+		matchers:     []MatcherFacade{bots, lines},
+		overallMax:   42,
 	}
+	matcherColorMap = make(map[string]string)
+	bots.historySparklineCache = "stale"
+	lines.historySparklineCache = "stale"
 
 	top := NewPredicateMatcher("top")
-	PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, top)
+	if !placeMatcher(top, matcherFirst) {
+		t.Fatal("placeMatcher rejected first placement")
+	}
 	if PattyGraph.matchers[0] != top {
-		t.Fatalf("insertMatcherFirst did not place matcher first")
+		t.Fatalf("placeMatcher did not place matcher first")
 	}
 	if !top.isHistorical {
 		t.Fatalf("top matcher isHistorical = false, want true")
 	}
+	if botsIndex != 1 {
+		t.Fatalf("botsIndex = %d, want 1 after first placement", botsIndex)
+	}
+	if PattyGraph.overallMax != -1 {
+		t.Fatalf("overallMax = %d, want cache invalidation sentinel -1", PattyGraph.overallMax)
+	}
+	if bots.historySparklineCache != "" || lines.historySparklineCache != "" {
+		t.Fatal("placement did not clear matcher sparkline caches")
+	}
+	if matcherColorMap[top.name] == "" || top.color != matcherColorMap[top.name] {
+		t.Fatalf("top color = %q, remembered color = %q", top.color, matcherColorMap[top.name])
+	}
 
 	beforeBots := NewPredicateMatcher("before-bots")
-	PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, beforeBots)
+	if !placeMatcher(beforeBots, matcherBeforeBots) {
+		t.Fatal("placeMatcher rejected before-Bots placement")
+	}
 	if PattyGraph.matchers[1] != beforeBots || PattyGraph.matchers[2] != bots {
-		t.Fatalf("insertMatcherBeforeBots order = %s, %s; want before-bots, Bots", PattyGraph.matchers[1].matcherName(), PattyGraph.matchers[2].matcherName())
+		t.Fatalf("before-Bots order = %s, %s; want before-bots, Bots", PattyGraph.matchers[1].matcherName(), PattyGraph.matchers[2].matcherName())
 	}
 	if !beforeBots.isHistorical {
 		t.Fatalf("before-bots matcher isHistorical = false, want true")
 	}
+	if botsIndex != 2 {
+		t.Fatalf("botsIndex = %d, want 2 after before-Bots placement", botsIndex)
+	}
 
 	beforeLines := NewPredicateMatcher("before-lines")
-	PattyGraph.matchers = insertMatcherBeforeLines(PattyGraph.matchers, beforeLines)
+	if !placeMatcher(beforeLines, matcherBeforeLines) {
+		t.Fatal("placeMatcher rejected before-lines placement")
+	}
 	if PattyGraph.matchers[3] != beforeLines || PattyGraph.matchers[4] != lines {
-		t.Fatalf("insertMatcherBeforeLines order = %s, %s; want before-lines, lines", PattyGraph.matchers[3].matcherName(), PattyGraph.matchers[4].matcherName())
+		t.Fatalf("before-lines order = %s, %s; want before-lines, lines", PattyGraph.matchers[3].matcherName(), PattyGraph.matchers[4].matcherName())
 	}
 	if beforeLines.isHistorical {
 		t.Fatalf("before-lines matcher isHistorical = true, want false")
+	}
+}
+
+func TestPlaceMatcherRejectsMissingPlacementAnchorWithoutMutation(t *testing.T) {
+	bots := NewPredicateMatcher(BotsMatcherName)
+	PattyGraph = &Monitor{
+		botsMatcher: bots,
+		matchers:    []MatcherFacade{bots},
+	}
+
+	original := append([]MatcherFacade(nil), PattyGraph.matchers...)
+	if placeMatcher(NewPredicateMatcher("observer"), matcherBeforeLines) {
+		t.Fatal("placeMatcher accepted placement without the lines anchor")
+	}
+	if len(PattyGraph.matchers) != len(original) || PattyGraph.matchers[0] != original[0] {
+		t.Fatal("failed placement mutated the matcher slice")
 	}
 }
 
@@ -401,8 +443,9 @@ func TestBotsMigrationSkipsWhenHigherCompetingMatcherWins(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	winner := SimplePredicateMatcher("winner", []string{"winner"})
 	winner.intervalCount = 3
-	PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, winner)
-	botsIndex = botsMatcherIndex()
+	if !placeMatcher(winner, matcherBeforeBots) {
+		t.Fatal("failed to place competing matcher")
+	}
 
 	PattyGraph.botsMatcher.intervalCount = 2
 	PattyGraph.botsMatcher.matchCountsMap["Googlebot"] = 2

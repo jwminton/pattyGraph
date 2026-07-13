@@ -582,42 +582,63 @@ func UpdateHistoricFlags() {
 	}
 }
 
-// insertMatcherFirst places a matcher at the top of the competitive lane.
-// This is used by explicit + placement and promotions that should compete
-// before all other matcher rows.
-func insertMatcherFirst(oldMatchers []MatcherFacade, newMatcher MatcherFacade) []MatcherFacade {
-	matchers := append([]MatcherFacade{newMatcher}, oldMatchers...)
-	setMatcherColor(newMatcher.asMatcher())
-	newMatcher.asMatcher().isHistorical = true
-	return matchers
+type matcherPlacement uint8
+
+const (
+	matcherFirst matcherPlacement = iota
+	matcherBeforeBots
+	matcherBeforeLines
+)
+
+// placeMatcher is the single structural entry point for dynamically created
+// matchers. Callers retain ownership of matcher construction, inherited state,
+// and placement policy; this function inserts the completed matcher and then
+// restores the ordering-dependent runtime state.
+func placeMatcher(newMatcher *Matcher, placement matcherPlacement) bool {
+	if PattyGraph == nil || newMatcher == nil {
+		return false
+	}
+
+	insertAt := -1
+	switch placement {
+	case matcherFirst:
+		insertAt = 0
+	case matcherBeforeBots:
+		insertAt = matcherFacadeIndex(PattyGraph.botsMatcher)
+	case matcherBeforeLines:
+		insertAt = matcherFacadeIndex(PattyGraph.linesMatcher)
+	default:
+		return false
+	}
+	if insertAt < 0 {
+		return false
+	}
+
+	PattyGraph.matchers = append(PattyGraph.matchers, nil)
+	copy(PattyGraph.matchers[insertAt+1:], PattyGraph.matchers[insertAt:])
+	PattyGraph.matchers[insertAt] = newMatcher
+	finalizeMatcherPlacement(newMatcher)
+	return true
 }
 
-// insertMatcherBeforeBots places a matcher in the competitive lane immediately
-// above Bots. This is the default user-added matcher position.
-func insertMatcherBeforeBots(matchers []MatcherFacade, newMatcher MatcherFacade) []MatcherFacade {
-	for i, matcher := range matchers {
-		if matcher.matcherName() == BotsMatcherName {
-			matchers = append(matchers[:i], append([]MatcherFacade{newMatcher}, matchers[i:]...)...)
-			setMatcherColor(newMatcher.asMatcher())
-			newMatcher.asMatcher().isHistorical = true
-			break
+func matcherFacadeIndex(target *Matcher) int {
+	if target == nil {
+		return -1
+	}
+	for i, matcher := range PattyGraph.matchers {
+		if matcher.asMatcher() == target {
+			return i
 		}
 	}
-	return matchers
+	return -1
 }
 
-// insertMatcherBeforeLines places a matcher below Bots but above system rows.
-// These rows observe every remaining line instead of competing before Bots.
-func insertMatcherBeforeLines(matchers []MatcherFacade, newMatcher MatcherFacade) []MatcherFacade {
-	for i, matcher := range matchers {
-		if matcher.matcherName() == "lines" {
-			matchers = append(matchers[:i], append([]MatcherFacade{newMatcher}, matchers[i:]...)...)
-			setMatcherColor(newMatcher.asMatcher())
-			newMatcher.asMatcher().isHistorical = false
-			break
-		}
-	}
-	return matchers
+// finalizeMatcherPlacement makes a new row visible to every ordering consumer
+// at once. UpdateHistoricFlags refreshes the Bots boundary, historical scaling,
+// and matcher sparkline caches after the slice has reached its final shape.
+func finalizeMatcherPlacement(newMatcher *Matcher) {
+	setMatcherColor(newMatcher)
+	UpdateHistoricFlags()
 }
 
 func lookupPurgeIntervals(purgeIntensity int) (int, int, int) {

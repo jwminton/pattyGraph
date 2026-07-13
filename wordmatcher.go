@@ -1303,8 +1303,9 @@ func (m *InterestingWordMatcher) migrateIps() {
 	topIpMatcher.intervalCount = lastCount
 	topIpMatcher.history = m.wordFrequency[localMax].historySlice()
 
-	PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, topIpMatcher)
-	botsMigrated++
+	if placeMatcher(topIpMatcher, matcherFirst) {
+		botsMigrated++
+	}
 	//m.wordFrequency[localMax].spawned = true
 }
 

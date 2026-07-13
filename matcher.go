@@ -165,11 +165,8 @@ func (m *Matcher) migrateTopBot(threshold float64) {
 	if matcherNameExists(topBot) {
 		return
 	}
-	if topCount < m.intervalCount {
-		m.intervalCount -= topCount
-	} else {
+	if topCount >= m.intervalCount {
 		topCount = m.intervalCount
-		m.intervalCount = 0
 	}
 
 	topBotMatcher := SimplePredicateMatcher(topBot, []string{topBot})
@@ -177,8 +174,10 @@ func (m *Matcher) migrateTopBot(threshold float64) {
 	topBotMatcher.inlineCommandAction = func() string {
 		return fmt.Sprintf("!!! add %s", topBot)
 	}
-	PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, topBotMatcher)
-	botsIndex = botsMatcherIndex()
+	if !placeMatcher(topBotMatcher, matcherBeforeBots) {
+		return
+	}
+	m.intervalCount -= topCount
 	botsMigrated++
 	delete(m.matchCountsMap, topBot)
 	m.displayMatchedCache = ""

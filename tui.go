@@ -639,11 +639,11 @@ func setUIHook() {
 						}
 
 						if event.Key() == tcell.KeyCtrlB {
-							PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, newM)
+							placeMatcher(newM, matcherBeforeBots)
 						} else if event.Key() == tcell.KeyCtrlN {
-							PattyGraph.matchers = insertMatcherBeforeLines(PattyGraph.matchers, newM)
+							placeMatcher(newM, matcherBeforeLines)
 						} else {
-							PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, newM)
+							placeMatcher(newM, matcherFirst)
 						}
 					}
 				}

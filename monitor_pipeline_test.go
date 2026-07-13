@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// Passing tests must be silent on stdout and stderr. Tests that deliberately
+// exercise a logged failure path suppress that expected output locally so a
+// clean test run needs no interpretation.
 func silenceExpectedLogs(t *testing.T) {
 	t.Helper()
 	previous := log.Writer()
@@ -221,8 +224,9 @@ func TestMatchErrorLineUpdatesErrsMatcher(t *testing.T) {
 func TestBotsWinStillAllowsBelowBotsAndSystemObservability(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	rangeWatch := IpsMatcher("range-watch", []string{"192.0."})
-	PattyGraph.matchers = insertMatcherBeforeLines(PattyGraph.matchers, rangeWatch)
-	botsIndex = botsMatcherIndex()
+	if !placeMatcher(rangeWatch, matcherBeforeLines) {
+		t.Fatal("failed to place below-Bots matcher")
+	}
 
 	line := standardPipelineLine(
 		"192.0.2.10",
@@ -247,8 +251,9 @@ func TestBotsWinStillAllowsBelowBotsAndSystemObservability(t *testing.T) {
 func TestAboveBotsMatcherWinsBeforeBotsButSystemObservabilityStillRuns(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	aboveBots := SimplePredicateMatcher("google-simple", []string{"Googlebot"})
-	PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, aboveBots)
-	botsIndex = botsMatcherIndex()
+	if !placeMatcher(aboveBots, matcherBeforeBots) {
+		t.Fatal("failed to place above-Bots matcher")
+	}
 
 	line := standardPipelineLine(
 		"192.0.2.10",
@@ -268,6 +273,36 @@ func TestAboveBotsMatcherWinsBeforeBotsButSystemObservabilityStillRuns(t *testin
 		t.Fatalf("Bots intervalCount = %d, want 0 when earlier competing matcher wins", PattyGraph.botsMatcher.intervalCount)
 	}
 	assertSystemObservabilityForTest(t, 321, 0, "robots.txt", "example.com", "192.0.2.10")
+}
+
+func TestRetainedMatcherPlacementRefreshesBoundaryBeforeNextMatch(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	promoted := WordsMatcher("probe", []string{"probe"})
+	promoted.history = []int{2, 3, 5}
+
+	if !placeMatcher(promoted, matcherFirst) {
+		t.Fatal("failed to place retained matcher")
+	}
+	if botsIndex != 1 {
+		t.Fatalf("botsIndex = %d, want 1 immediately after retained matcher placement", botsIndex)
+	}
+
+	line := standardPipelineLine(
+		"192.0.2.10",
+		"/probe",
+		"200",
+		"321",
+		"-",
+		"Mozilla/5.0 Googlebot/2.1",
+	)
+	match(line)
+
+	if promoted.intervalCount != 1 {
+		t.Fatalf("promoted interval count = %d, want 1", promoted.intervalCount)
+	}
+	if PattyGraph.botsMatcher.intervalCount != 0 {
+		t.Fatalf("Bots interval count = %d, want 0 after promoted matcher claimed line", PattyGraph.botsMatcher.intervalCount)
+	}
 }
 
 func assertSystemObservabilityForTest(t *testing.T, bytesValue int, errsCount int, word string, ref string, ip string) {

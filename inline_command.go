@@ -320,28 +320,34 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			return line
 		}
 		placement := "before_bots"
+		placementMode := matcherBeforeBots
 		// Name prefixes choose the matcher lane: + goes first in the
 		// competitive lane, -/default goes immediately before Bots, and * goes
 		// below Bots before system rows so it observes instead of competes.
 		switch originalName[0:1] {
 		case "*":
 			placement = "before_lines"
-			PattyGraph.matchers = insertMatcherBeforeLines(PattyGraph.matchers, newM)
+			placementMode = matcherBeforeLines
 		case "+":
 			placement = "first"
-			PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, newM)
+			placementMode = matcherFirst
 		case "-":
 			placement = "before_bots"
-			PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, newM)
+			placementMode = matcherBeforeBots
 		default:
 			if len(newM.history) > 0 {
 				placement = "first"
-				PattyGraph.matchers = insertMatcherFirst(PattyGraph.matchers, newM)
+				placementMode = matcherFirst
 			} else {
-				PattyGraph.matchers = insertMatcherBeforeBots(PattyGraph.matchers, newM)
+				placementMode = matcherBeforeBots
 			}
 		}
-		botsIndex = botsMatcherIndex()
+		if !placeMatcher(newM, placementMode) {
+			result := inlineCommandRejected(cmd, "add_matcher", "matcher placement anchor not found")
+			result.Result["matcher_name"] = name
+			result.Result["placement"] = placement
+			return result
+		}
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "add_matcher")
 		result.Result["matcher_name"] = name
 		result.Result["placement"] = placement
