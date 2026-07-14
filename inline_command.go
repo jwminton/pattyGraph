@@ -632,8 +632,17 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		purgePeakWordCommand()
 		return inlineCommandResult(cmd, InlineCommandStatusApplied, "purge")
 	case "pattySplat", "pattysplat", "PATTYSPLAT":
-		pattySplat()
-		return inlineCommandResult(cmd, InlineCommandStatusApplied, "write_splat")
+		path, err := pattySplat()
+		if err != nil {
+			result := inlineCommandResult(cmd, InlineCommandStatusError, "write_splat")
+			result.Result["error"] = err.Error()
+			result.Result["path"] = path
+			return result
+		}
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "write_splat")
+		result.Result["file"] = filepath.Base(path)
+		result.Result["path"] = path
+		return result
 	case "popBots", "popbots", "POPBOTS":
 		PattyGraph.botsMatcher.migrateBots(-1)
 		return inlineCommandResult(cmd, InlineCommandStatusApplied, "pop_bots")
@@ -641,8 +650,17 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		compactCaches()
 		return inlineCommandResult(cmd, InlineCommandStatusApplied, "compact_caches")
 	case "dumpConfig", "dumpconfig", "DUMPCONFIG":
-		dumpConfig()
-		return inlineCommandResult(cmd, InlineCommandStatusApplied, "write_config")
+		path, err := dumpConfig()
+		if err != nil {
+			result := inlineCommandResult(cmd, InlineCommandStatusError, "write_config")
+			result.Result["error"] = err.Error()
+			result.Result["path"] = path
+			return result
+		}
+		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "write_config")
+		result.Result["file"] = filepath.Base(path)
+		result.Result["path"] = path
+		return result
 	default:
 		// Property settings consume one quote-aware value and intentionally stop;
 		// each setting validates that value before SetFlagByName applies it.
@@ -921,14 +939,15 @@ func purgePeakWordCommand() {
 	PattyGraph.refsMatcher.purgePeakWords()
 	PattyGraph.ipsMatcher.purgePeakWords()
 }
-func pattySplat() {
+func pattySplat() (string, error) {
 	path, err := PattyGraph.printToFile()
 	if err != nil {
 		pushErrorNow("Splat write failed: %s", err)
 		log.Printf("Splat write failed for %s: %v", path, err)
-		return
+		return path, err
 	}
 	pushSystemNow("Splat saved: %s", filepath.Base(path))
+	return path, nil
 }
 
 func dumpConfig() (string, error) {

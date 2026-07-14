@@ -192,3 +192,67 @@ func TestPrintToFileStripsColorTags(t *testing.T) {
 		}
 	}
 }
+
+func TestInlinePattySplatReportsFileToFactoidAndCommandResult(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts = NewFactoidGenerator()
+	facts.forced = nil
+	dir := t.TempDir()
+	PattyGraph.pattyConfig.saveDir = dir
+
+	result := invokeInlineCommand("!!! pattySplat")
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	path, ok := result.Result["path"].(string)
+	if !ok || filepath.Dir(path) != dir {
+		t.Fatalf("path = %#v, want splat under %q", result.Result["path"], dir)
+	}
+	file, ok := result.Result["file"].(string)
+	if !ok || file != filepath.Base(path) {
+		t.Fatalf("file = %#v, want %q", result.Result["file"], filepath.Base(path))
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("created splat %q: %v", path, err)
+	}
+
+	wrapped := getWrappedFactoid()
+	if !strings.Contains(wrapped, "Splat saved: "+file) {
+		t.Fatalf("ticker factoid = %q, want created splat filename %q", wrapped, file)
+	}
+	if len(factoidHistory) == 0 || !strings.Contains(factoidHistory[0], "Splat saved: "+file) {
+		t.Fatalf("factoid history = %v, want created splat filename %q", factoidHistory, file)
+	}
+}
+
+func TestInlineDumpConfigReportsFileToFactoidAndCommandResult(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts = NewFactoidGenerator()
+	facts.forced = nil
+	dir := t.TempDir()
+	PattyGraph.pattyConfig.saveDir = dir
+
+	result := invokeInlineCommand("!!! dumpConfig")
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	path, ok := result.Result["path"].(string)
+	if !ok || filepath.Dir(path) != dir {
+		t.Fatalf("path = %#v, want config under %q", result.Result["path"], dir)
+	}
+	file, ok := result.Result["file"].(string)
+	if !ok || file != filepath.Base(path) {
+		t.Fatalf("file = %#v, want %q", result.Result["file"], filepath.Base(path))
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("created config %q: %v", path, err)
+	}
+
+	wrapped := getWrappedFactoid()
+	if !strings.Contains(wrapped, "Config saved: "+file) {
+		t.Fatalf("ticker factoid = %q, want created config filename %q", wrapped, file)
+	}
+	if len(factoidHistory) == 0 || !strings.Contains(factoidHistory[0], "Config saved: "+file) {
+		t.Fatalf("factoid history = %v, want created config filename %q", factoidHistory, file)
+	}
+}

@@ -374,9 +374,9 @@ func (m *Matcher) match() bool {
 }
 
 func (m *Matcher) displayLogLine() string {
-	if PattyGraph.tabViewIndexKey == 0 {
+	if PattyGraph.secondaryView == SecondaryViewPattyFactor {
 		return m.displayFirstLine()
-	} else if PattyGraph.tabViewIndexKey == 1 {
+	} else if PattyGraph.secondaryView == SecondaryViewPrimeFlux {
 		return m.displayFirstIntervalLine()
 	}
 	return m.displayLastLine()

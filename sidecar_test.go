@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +96,56 @@ func TestSidecarWordEntriesAreCappedSortedAndRanked(t *testing.T) {
 	}
 	if entries[len(entries)-1].Key != "word03" {
 		t.Fatalf("last capped key = %q, want word03", entries[len(entries)-1].Key)
+	}
+}
+
+func TestSidecarIPGroupMetricsAreIndependentOfTabView(t *testing.T) {
+	const epsilon = 1e-12
+	var baseline SidecarIPGroupEntry
+
+	for view := SecondaryViewPattyFactor; view < secondaryViewCount; view++ {
+		t.Run(fmt.Sprintf("view_%d", view), func(t *testing.T) {
+			setupMonitorPipelineTestGraph()
+			PattyGraph.secondaryView = view
+			matcher, prefix := secondaryPrefixFixture()
+
+			burstinessSum := 0.0
+			for _, stats := range matcher.wordFrequency {
+				burstinessSum += stats.burstiness()
+			}
+			wantBurstiness := burstinessSum / float64(IpGroupActiveThreshold)
+
+			entries := sidecarIPGroupEntries(matcher, defaultSidecarTopLimit, DefaultSidecarOptions())
+			if len(entries) != 1 {
+				t.Fatalf("IP group entries = %d, want 1: %#v", len(entries), entries)
+			}
+			entry := entries[0]
+			if entry.Prefix != prefix {
+				t.Fatalf("prefix = %q, want %q", entry.Prefix, prefix)
+			}
+			if entry.Members != IpGroupActiveThreshold {
+				t.Fatalf("members = %d, want %d", entry.Members, IpGroupActiveThreshold)
+			}
+			if entry.Bytes != uint64(IpGroupActiveThreshold*1024) {
+				t.Fatalf("bytes = %d, want %d", entry.Bytes, IpGroupActiveThreshold*1024)
+			}
+			if math.Abs(entry.Burstiness-wantBurstiness) > epsilon {
+				t.Fatalf("burstiness = %v, want member average %v", entry.Burstiness, wantBurstiness)
+			}
+			if math.Abs(entry.AgentDeltaMetric-0.20) > epsilon {
+				t.Fatalf("agent delta = %v, want member average 0.20", entry.AgentDeltaMetric)
+			}
+
+			if view == SecondaryViewPattyFactor {
+				baseline = entry
+				return
+			}
+			if entry.Bytes != baseline.Bytes ||
+				math.Abs(entry.Burstiness-baseline.Burstiness) > epsilon ||
+				math.Abs(entry.AgentDeltaMetric-baseline.AgentDeltaMetric) > epsilon {
+				t.Fatalf("view-dependent sidecar metrics: got %#v, baseline %#v", entry, baseline)
+			}
+		})
 	}
 }
 

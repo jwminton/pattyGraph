@@ -35,20 +35,20 @@ func TestSecondaryEntryMetricViews(t *testing.T) {
 	matcher := NewInterestingWordMatcher("words", 60)
 
 	tests := []struct {
-		view int
+		view SecondaryView
 		want string
 	}{
-		{view: 0, want: "  2.50"},
-		{view: 1, want: "    18"},
-		{view: 2, want: "  [3]"},
-		{view: 3, want: "   25%"},
-		{view: 4, want: "▆▅▄   "},
-		{view: 5, want: "    4K"},
+		{view: SecondaryViewPattyFactor, want: "  2.50"},
+		{view: SecondaryViewPrimeFlux, want: "    18"},
+		{view: SecondaryViewHistoryDepth, want: "  [3]"},
+		{view: SecondaryViewAgentDelta, want: "   25%"},
+		{view: SecondaryViewSparkline, want: "▆▅▄   "},
+		{view: SecondaryViewBytes, want: "    4K"},
 	}
 
 	for _, test := range tests {
 		t.Run(fmt.Sprintf("view_%d", test.view), func(t *testing.T) {
-			PattyGraph.tabViewIndexKey = test.view
+			PattyGraph.secondaryView = test.view
 			if got := matcher.secondaryEntryMetric(stats, 2); got != test.want {
 				t.Fatalf("secondary metric = %q, want %q", got, test.want)
 			}
@@ -58,7 +58,7 @@ func TestSecondaryEntryMetricViews(t *testing.T) {
 
 func TestSecondaryEntryMetricIPUsesBurstiness(t *testing.T) {
 	setupMonitorPipelineTestGraph()
-	PattyGraph.tabViewIndexKey = 0
+	PattyGraph.secondaryView = SecondaryViewPattyFactor
 	stats := secondaryTestStats([]int{2, 4, 6})
 	matcher := WordMatcherFactory("ips")
 
@@ -94,21 +94,21 @@ func secondaryPrefixFixture() (*InterestingWordMatcher, string) {
 
 func TestSecondaryIPPrefixMetricViews(t *testing.T) {
 	tests := []struct {
-		view int
+		view SecondaryView
 		want string
 	}{
-		{view: 0, want: "  0.02"},
-		{view: 1, want: "    75"},
-		{view: 2, want: "[3]"},
-		{view: 3, want: "   20%"},
-		{view: 4, want: "▇▆▄   "},
-		{view: 5, want: "   15K"},
+		{view: SecondaryViewPattyFactor, want: "  0.02"},
+		{view: SecondaryViewPrimeFlux, want: "    75"},
+		{view: SecondaryViewHistoryDepth, want: "[3]"},
+		{view: SecondaryViewAgentDelta, want: "   20%"},
+		{view: SecondaryViewSparkline, want: "▇▆▄   "},
+		{view: SecondaryViewBytes, want: "   15K"},
 	}
 
 	for _, test := range tests {
 		t.Run(fmt.Sprintf("view_%d", test.view), func(t *testing.T) {
 			setupMonitorPipelineTestGraph()
-			PattyGraph.tabViewIndexKey = test.view
+			PattyGraph.secondaryView = test.view
 			PattyGraph.miniWindowIndex = 0
 			matcher, prefix := secondaryPrefixFixture()
 
@@ -119,10 +119,10 @@ func TestSecondaryIPPrefixMetricViews(t *testing.T) {
 			if !strings.Contains(display, test.want) {
 				t.Fatalf("prefix display %q does not contain metric %q", display, test.want)
 			}
-			if test.view == 2 && matcher.ipScratch.prefixDepths[prefix] != 3 {
+			if test.view == SecondaryViewHistoryDepth && matcher.ipScratch.prefixDepths[prefix] != 3 {
 				t.Fatalf("prefix depth = %d, want 3", matcher.ipScratch.prefixDepths[prefix])
 			}
-			if test.view == 4 {
+			if test.view == SecondaryViewSparkline {
 				got := matcher.ipScratch.prefixHistorAggregateBufs[prefix].Slice()
 				want := []int{14, 32, 47}
 				if !reflect.DeepEqual(got, want) {
@@ -135,11 +135,20 @@ func TestSecondaryIPPrefixMetricViews(t *testing.T) {
 
 func TestSecondaryTabGlyphOrder(t *testing.T) {
 	setupMonitorPipelineTestGraph()
-	want := []string{"-", "/", "|", "\\", "=", "_"}
-	for view, glyph := range want {
-		PattyGraph.tabViewIndexKey = view
-		if got := tabGlyph(); got != glyph {
-			t.Fatalf("view %d glyph = %q, want %q", view, got, glyph)
+	tests := []struct {
+		view  SecondaryView
+		glyph string
+	}{
+		{view: SecondaryViewPattyFactor, glyph: "-"},
+		{view: SecondaryViewPrimeFlux, glyph: "/"},
+		{view: SecondaryViewHistoryDepth, glyph: "|"},
+		{view: SecondaryViewAgentDelta, glyph: "\\"},
+		{view: SecondaryViewSparkline, glyph: "="},
+		{view: SecondaryViewBytes, glyph: "_"},
+	}
+	for _, test := range tests {
+		if got := test.view.Glyph(); got != test.glyph {
+			t.Fatalf("view %d glyph = %q, want %q", test.view, got, test.glyph)
 		}
 	}
 }
@@ -154,19 +163,26 @@ func TestSecondaryManualTabProgression(t *testing.T) {
 	tab := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
 
 	PattyGraph.demo = true
-	PattyGraph.tabViewIndexKey = 2
+	PattyGraph.secondaryView = SecondaryViewHistoryDepth
 	capture(tab)
 	if PattyGraph.demo {
 		t.Fatal("manual Tab did not stop demo mode")
 	}
-	if PattyGraph.tabViewIndexKey != 2 {
-		t.Fatalf("demo-stop Tab changed view to %d, want 2", PattyGraph.tabViewIndexKey)
+	if PattyGraph.secondaryView != SecondaryViewHistoryDepth {
+		t.Fatalf("demo-stop Tab changed view to %d, want %d", PattyGraph.secondaryView, SecondaryViewHistoryDepth)
 	}
 
-	for _, want := range []int{3, 4, 5, 0, 1, 2} {
+	for _, want := range []SecondaryView{
+		SecondaryViewAgentDelta,
+		SecondaryViewSparkline,
+		SecondaryViewBytes,
+		SecondaryViewPattyFactor,
+		SecondaryViewPrimeFlux,
+		SecondaryViewHistoryDepth,
+	} {
 		capture(tab)
-		if PattyGraph.tabViewIndexKey != want {
-			t.Fatalf("manual Tab view = %d, want %d", PattyGraph.tabViewIndexKey, want)
+		if PattyGraph.secondaryView != want {
+			t.Fatalf("manual Tab view = %d, want %d", PattyGraph.secondaryView, want)
 		}
 	}
 }
@@ -174,18 +190,18 @@ func TestSecondaryManualTabProgression(t *testing.T) {
 func TestSecondaryDemoTabProgression(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	PattyGraph.demo = true
-	PattyGraph.tabViewIndexKey = 5
+	PattyGraph.secondaryView = SecondaryViewBytes
 	logicalCycles = 9
 
 	incrementCycle()
-	if PattyGraph.tabViewIndexKey != 0 {
-		t.Fatalf("demo view after cycle 10 = %d, want wrapped view 0", PattyGraph.tabViewIndexKey)
+	if PattyGraph.secondaryView != SecondaryViewPattyFactor {
+		t.Fatalf("demo view after cycle 10 = %d, want wrapped view %d", PattyGraph.secondaryView, SecondaryViewPattyFactor)
 	}
 	for i := 0; i < 10; i++ {
 		incrementCycle()
 	}
-	if PattyGraph.tabViewIndexKey != 1 {
-		t.Fatalf("demo view after cycle 20 = %d, want view 1", PattyGraph.tabViewIndexKey)
+	if PattyGraph.secondaryView != SecondaryViewPrimeFlux {
+		t.Fatalf("demo view after cycle 20 = %d, want view %d", PattyGraph.secondaryView, SecondaryViewPrimeFlux)
 	}
 }
 
@@ -208,21 +224,21 @@ func TestSecondarySourceViewDispatch(t *testing.T) {
 	PattyGraph.selectedInterestingMatcher = interesting
 
 	tests := []struct {
-		view            int
+		view            SecondaryView
 		matcherWant     string
 		interestingWant string
 	}{
-		{view: 0, matcherWant: "matcher first source", interestingWant: "interesting first source"},
-		{view: 1, matcherWant: "matcher interval source", interestingWant: "interesting interval source"},
-		{view: 2, matcherWant: "matcher latest source", interestingWant: "interesting latest source"},
-		{view: 3, matcherWant: "matcher latest source", interestingWant: "interesting latest source"},
-		{view: 4, matcherWant: "matcher latest source", interestingWant: "interesting latest source"},
-		{view: 5, matcherWant: "matcher latest source", interestingWant: "interesting latest source"},
+		{view: SecondaryViewPattyFactor, matcherWant: "matcher first source", interestingWant: "interesting first source"},
+		{view: SecondaryViewPrimeFlux, matcherWant: "matcher interval source", interestingWant: "interesting interval source"},
+		{view: SecondaryViewHistoryDepth, matcherWant: "matcher latest source", interestingWant: "interesting latest source"},
+		{view: SecondaryViewAgentDelta, matcherWant: "matcher latest source", interestingWant: "interesting latest source"},
+		{view: SecondaryViewSparkline, matcherWant: "matcher latest source", interestingWant: "interesting latest source"},
+		{view: SecondaryViewBytes, matcherWant: "matcher latest source", interestingWant: "interesting latest source"},
 	}
 
 	for _, test := range tests {
 		t.Run(fmt.Sprintf("view_%d", test.view), func(t *testing.T) {
-			PattyGraph.tabViewIndexKey = test.view
+			PattyGraph.secondaryView = test.view
 			if got := matcher.displayLogLine(); !strings.Contains(got, test.matcherWant) {
 				t.Fatalf("matcher source display = %q, want %q", got, test.matcherWant)
 			}

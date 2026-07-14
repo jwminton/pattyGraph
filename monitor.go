@@ -65,7 +65,7 @@ type Monitor struct {
 	bytesMatcher *Matcher
 	errsMatcher  *Matcher
 
-	tabViewIndexKey    int // secondary-view tab index
+	secondaryView      SecondaryView
 	selectedGraphValue int
 	logtime            time.Time  // updated once a cycle from log input. Used for status display only.
 	logtimeCache       *time.Time // part of the trigger for log time cache update once a cycle
@@ -471,7 +471,7 @@ func incrementCycle() {
 	logicalCycles++
 	if PattyGraph.demo {
 		if logicalCycles%10 == 0 {
-			PattyGraph.tabViewIndexKey = (PattyGraph.tabViewIndexKey + 1) % SecondaryInfoTabDepth
+			PattyGraph.secondaryView = PattyGraph.secondaryView.Next()
 		}
 	}
 	if displayFreezeCountdown > 0 {

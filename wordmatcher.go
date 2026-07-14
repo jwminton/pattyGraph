@@ -177,13 +177,13 @@ func (m *InterestingWordMatcher) displayString() string {
 		//	line = stats.source.logLine
 		//	// IP Groups don't have a log line bc its a faux entry for the aggregate
 		//	// use last line if tabbed from first tab view
-		//	if PattyGraph.tabViewIndexKey == 1 {
+		//	if PattyGraph.secondaryView == SecondaryViewPrimeFlux {
 		//		if stats.firstIntervalLine != nil && stats.firstIntervalLine.logLine != "" {
 		//			line = stats.firstIntervalLine.logLine
 		//		} else {
 		//			line = ""
 		//		}
-		//	} else if PattyGraph.tabViewIndexKey > 1 {
+		//	} else if PattyGraph.secondaryView > SecondaryViewPrimeFlux {
 		//		if stats.lastLine != nil && stats.lastLine.logLine != "" {
 		//			line = stats.lastLine.logLine
 		//		}
@@ -221,14 +221,17 @@ func (m *InterestingWordMatcher) displayLogLine() string {
 			line = stats.source.logLine
 			// IP Groups don't have a log line bc its a faux entry for the aggregate
 			// use last line if tabbed from first tab view
-			if PattyGraph.tabViewIndexKey == 1 {
+			switch PattyGraph.secondaryView {
+			case SecondaryViewPrimeFlux:
 				line = stats.firstIntervalLogLine
 				//if stats.firstIntervalLine != nil && stats.firstIntervalLine.logLine != "" {
 				//	line = stats.firstIntervalLine.logLine
 				//} else {
 				//	line = ""
 				//}
-			} else if PattyGraph.tabViewIndexKey > 1 {
+			case SecondaryViewPattyFactor:
+				// The first-seen source is already selected above.
+			default:
 				//if stats.lastLine != nil && stats.lastLine.logLine != "" {
 				//	line = stats.lastLine.logLine
 				//}
@@ -627,16 +630,16 @@ func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
 		prefix := prefixMarker.prefix
 		for _, ipAddr := range m.ipScratch.ActivePrefixMembers(prefix) {
 			stats := m.wordFrequency[ipAddr]
-			switch PattyGraph.tabViewIndexKey {
+			switch PattyGraph.secondaryView {
 			// burstiness was worse before it was a cached value
-			case 0:
+			case SecondaryViewPattyFactor:
 				// burstiness
 				scratch.prefixBursts[prefix] += stats.burstiness()
-			case 3:
+			case SecondaryViewAgentDelta:
 				//secondaryKeyOut.WriteString(fmt.Sprintf("%5d%%", int(stats.agentDeltaMetric*100)))
 				scratch.prefixDeltas[prefix] += stats.agentDeltaMetric
 				//secondaryString = fmt.Sprintf("%5d%%", int(float64(scratch.prefixDeltas[group.prefix])/float64(scratch.prefixMembers[group.prefix]))*100)
-			case 5:
+			case SecondaryViewBytes:
 				// burstiness
 				scratch.prefixBytes[prefix] += stats.bytes
 			}
@@ -691,22 +694,22 @@ func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
 		}
 		var secondaryString string
 		// Some of this is an estimation and it can't really be pulled out bc its a lot of 2nd level derived data.
-		switch PattyGraph.tabViewIndexKey {
-		case 0:
+		switch PattyGraph.secondaryView {
+		case SecondaryViewPattyFactor:
 			// burstiness
 			secondaryString = fmt.Sprintf("%6.2f", float64(scratch.prefixBursts[group.prefix])/float64(scratch.prefixMembers[group.prefix]))
-		case 1:
+		case SecondaryViewPrimeFlux:
 			// countPlusFirst
 			secondaryString = fmt.Sprintf("%6d", group.countPlusFirst)
-		case 2:
+		case SecondaryViewHistoryDepth:
 			secondaryString = fmt.Sprintf("[%d]", scratch.prefixDepths[group.prefix])
-		case 3:
+		case SecondaryViewAgentDelta:
 			//secondaryKeyOut.WriteString(fmt.Sprintf("%5d%%", int(stats.agentDeltaMetric*100)))
 			secondaryString = fmt.Sprintf("%5d%%", int(100*scratch.prefixDeltas[group.prefix]/float64(scratch.prefixMembers[group.prefix])))
-		case 4:
+		case SecondaryViewSparkline:
 			//secondaryString = fmt.Sprintf("%-6s", miniReverseSparklineFromArray(*scratch.prefixHistoryBufs[group.prefix].ReverseSlice()))
 			secondaryString = fmt.Sprintf("%-6s", miniReverseSparklineFromArray(scratch.prefixHistorAggregateBufs[group.prefix].ReverseSlice()))
-		case 5:
+		case SecondaryViewBytes:
 			// Bytes this interval
 			secondaryString = fmt.Sprintf("%6s", formatBytes64(scratch.prefixBytes[group.prefix]))
 		}
@@ -1228,8 +1231,8 @@ func (m *InterestingWordMatcher) selectDisplayItemByKey(selection string) (int, 
 
 // secondaryEntryMetric is the tab-cycled info displayed on the right side of every entry.
 func (m *InterestingWordMatcher) secondaryEntryMetric(stats *WordStats, nDenom float64) string {
-	switch PattyGraph.tabViewIndexKey {
-	case 0:
+	switch PattyGraph.secondaryView {
+	case SecondaryViewPattyFactor:
 		if m.ipScratch != nil {
 			fullStat := stats.burstiness()
 			//secondaryKeyBuilder.WriteString(fmt.Sprintf("%6.2f", fullStat))
@@ -1238,19 +1241,19 @@ func (m *InterestingWordMatcher) secondaryEntryMetric(stats *WordStats, nDenom f
 			entryStatNormalized := stats.normalized()
 			return fmt.Sprintf("%6.2f", entryStatNormalized/nDenom)
 		}
-	case 1:
+	case SecondaryViewPrimeFlux:
 		fullStat := stats.primeFlux
 		return fmt.Sprintf("%6d", fullStat)
-	case 2:
+	case SecondaryViewHistoryDepth:
 		fullStat := stats.historyLength()
 		return fmt.Sprintf("  [%d]", fullStat)
-	case 3:
+	case SecondaryViewAgentDelta:
 		return fmt.Sprintf("%5d%%", int(stats.agentDeltaMetric*100))
-	case 4:
+	case SecondaryViewSparkline:
 		return fmt.Sprintf("%-6s", m.miniSparkForStats(stats))
-	case 5:
+	case SecondaryViewBytes:
 		return fmt.Sprintf("%6s", formatBytes64(stats.bytes))
-	default: // can't happen bc PattyGraph.tabViewIndexKey is never > 4
+	default:
 		return ""
 	}
 }

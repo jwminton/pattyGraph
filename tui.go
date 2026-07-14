@@ -13,9 +13,39 @@ import (
 	"github.com/rivo/tview"
 )
 
-func tabGlyph() string {
-	symbols := []string{"-", "/", "|", "\\", "=", "_"}
-	return symbols[PattyGraph.tabViewIndexKey%len(symbols)]
+type SecondaryView uint8
+
+const (
+	SecondaryViewPattyFactor SecondaryView = iota
+	SecondaryViewPrimeFlux
+	SecondaryViewHistoryDepth
+	SecondaryViewAgentDelta
+	SecondaryViewSparkline
+	SecondaryViewBytes
+	secondaryViewCount
+)
+
+func (v SecondaryView) Next() SecondaryView {
+	return (v + 1) % secondaryViewCount
+}
+
+func (v SecondaryView) Glyph() string {
+	switch v {
+	case SecondaryViewPattyFactor:
+		return "-"
+	case SecondaryViewPrimeFlux:
+		return "/"
+	case SecondaryViewHistoryDepth:
+		return "|"
+	case SecondaryViewAgentDelta:
+		return "\\"
+	case SecondaryViewSparkline:
+		return "="
+	case SecondaryViewBytes:
+		return "_"
+	default:
+		return ""
+	}
 }
 func columnRuler() string {
 	return fillRuler(PattyPrintWidth, true)
@@ -477,7 +507,7 @@ func setUIHook() {
 			if PattyGraph.demo {
 				PattyGraph.demo = false
 			} else {
-				PattyGraph.tabViewIndexKey = (PattyGraph.tabViewIndexKey + 1) % SecondaryInfoTabDepth
+				PattyGraph.secondaryView = PattyGraph.secondaryView.Next()
 			}
 			return nil
 		case tcell.KeyRight:
@@ -827,7 +857,7 @@ func (mon *Monitor) statusLine() string {
 
 	status.WriteString(fmt.Sprintf("%2d", fluxDepth))
 
-	status.WriteString(tabGlyph())
+	status.WriteString(mon.secondaryView.Glyph())
 	status.WriteString(fmt.Sprintf("{%d:", pattyPushFactor))
 	status.WriteString(fmt.Sprintf("%d.%d.%d",
 		mon.wordsMatcher.timeToLive,

@@ -54,8 +54,6 @@ const (
 	pattyBurstMin           = 0.1
 	DefaultMBToRead         = 50
 	DefaultFluxDepth        = 3
-
-	SecondaryInfoTabDepth = 6
 )
 
 const (

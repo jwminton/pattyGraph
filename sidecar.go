@@ -229,9 +229,9 @@ type SidecarIPGroupEntry struct {
 	Count             int     `json:"count"`
 	CountPlusFirst    int     `json:"count_plus_first"`
 	Members           int     `json:"members"`
-	Bytes             uint64  `json:"bytes,omitempty"`
-	Burstiness        float64 `json:"burstiness"`
-	AgentDeltaMetric  float64 `json:"agent_delta_metric"`
+	Bytes             uint64  `json:"bytes,omitempty"`    // current-interval member sum
+	Burstiness        float64 `json:"burstiness"`         // active-member average
+	AgentDeltaMetric  float64 `json:"agent_delta_metric"` // active-member average
 	History           []int   `json:"history,omitempty"`
 	HistoryDepth      int     `json:"history_depth"`
 	Color             string  `json:"color,omitempty"`
@@ -624,6 +624,36 @@ func sidecarWordEntry(m *InterestingWordMatcher, key string, stats *WordStats, o
 	return entry
 }
 
+type sidecarIPGroupMetrics struct {
+	bytes             uint64
+	burstiness        float64
+	agentDeltaMetric  float64
+	contributingCount int
+}
+
+// sidecarMetricsForIPGroup derives structured values independently of the
+// active TUI tab. This interval-only pass deliberately avoids adding work to
+// displayIpGroups(), PattyGraph's most performance-sensitive display path.
+func sidecarMetricsForIPGroup(m *InterestingWordMatcher, prefix string) sidecarIPGroupMetrics {
+	var metrics sidecarIPGroupMetrics
+	for _, ip := range m.ipScratch.ActivePrefixMembers(prefix) {
+		stats, exists := m.wordFrequency[ip]
+		if !exists || stats == nil {
+			continue
+		}
+		metrics.bytes += stats.bytes
+		metrics.burstiness += stats.burstiness()
+		metrics.agentDeltaMetric += stats.agentDeltaMetric
+		metrics.contributingCount++
+	}
+	if metrics.contributingCount > 0 {
+		members := float64(metrics.contributingCount)
+		metrics.burstiness /= members
+		metrics.agentDeltaMetric /= members
+	}
+	return metrics
+}
+
 func sidecarIPGroupEntries(m *InterestingWordMatcher, limit int, opts SidecarOptions) []SidecarIPGroupEntry {
 	defer m.topTracker.Reset()
 	_ = m.topWordEntries()
@@ -641,18 +671,15 @@ func sidecarIPGroupEntries(m *InterestingWordMatcher, limit int, opts SidecarOpt
 			captureMatcher: m.ipScratch.prefixMatchers[prefix],
 		})
 		entry := SidecarIPGroupEntry{
-			Prefix:           prefix,
-			Score:            score,
-			Count:            count,
-			CountPlusFirst:   m.ipScratch.prefixFirstPlusCounts[prefix],
-			Members:          m.ipScratch.prefixMembers[prefix],
-			Bytes:            m.ipScratch.prefixBytes[prefix],
-			Burstiness:       m.ipScratch.prefixBursts[prefix],
-			AgentDeltaMetric: m.ipScratch.prefixDeltas[prefix],
-			HistoryDepth:     m.ipScratch.prefixDepths[prefix],
-			Color:            strings.Trim(m.ipScratch.prefixColors[prefix], "[]"),
-			MarkedState:      markedState,
-			MarkedByMatcher:  markedByMatcher,
+			Prefix:          prefix,
+			Score:           score,
+			Count:           count,
+			CountPlusFirst:  m.ipScratch.prefixFirstPlusCounts[prefix],
+			Members:         m.ipScratch.prefixMembers[prefix],
+			HistoryDepth:    m.ipScratch.prefixDepths[prefix],
+			Color:           strings.Trim(m.ipScratch.prefixColors[prefix], "[]"),
+			MarkedState:     markedState,
+			MarkedByMatcher: markedByMatcher,
 		}
 		if opts.IncludeHistories {
 			entry.History = history
@@ -674,6 +701,10 @@ func sidecarIPGroupEntries(m *InterestingWordMatcher, limit int, opts SidecarOpt
 		entries = entries[:limit]
 	}
 	for i := range entries {
+		metrics := sidecarMetricsForIPGroup(m, entries[i].Prefix)
+		entries[i].Bytes = metrics.bytes
+		entries[i].Burstiness = metrics.burstiness
+		entries[i].AgentDeltaMetric = metrics.agentDeltaMetric
 		entries[i].Rank = i + 1
 	}
 	return entries
