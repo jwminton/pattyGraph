@@ -319,6 +319,26 @@ func TestSidecarControlCommandPreservesInvalidArgumentFields(t *testing.T) {
 	}
 }
 
+func TestSidecarControlCommandIncludesRequestedFactText(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts = NewFactoidGenerator()
+	facts.forced = nil
+	logLoadDuration = 1250 * time.Millisecond
+	logLoadIntervalCount = 17
+	result := invokeInlineCommand("!!! fact init.history")
+	event := PattyGraph.SidecarControlCommand("!!! fact init.history", "control_file", result)
+
+	if event.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q", event.Status, InlineCommandStatusApplied)
+	}
+	if event.Result["fact"] != "init.history" {
+		t.Fatalf("fact = %v, want init.history", event.Result["fact"])
+	}
+	if event.Result["text"] != "Init(1s250ms):17min history" {
+		t.Fatalf("text = %q, want rendered init.history fact", event.Result["text"])
+	}
+}
+
 func TestSidecarControlCommandWrittenWhenJSONOffDisablesOutput(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	dir := t.TempDir()

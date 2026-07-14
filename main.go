@@ -124,12 +124,17 @@ func main() {
 	// are already populated before the operator sees the first screen.
 	beforeLoadTime := time.Now()
 	preloadRecentMinutes()
-	logLoadDuration = time.Since(beforeLoadTime)
-	logLoadLinecount = PattyGraph.totalLines
-	logLoadIntervalCount = PattyGraph.intervalsCompleted
+	loadDuration := time.Since(beforeLoadTime)
 	var stats debug.GCStats
 	debug.ReadGCStats(&stats)
+	// Control-file fact requests can arrive during preload. Publish the completed
+	// startup measurements together so init.* facts never observe a partial set.
+	mu.Lock()
+	logLoadDuration = loadDuration
+	logLoadLinecount = PattyGraph.totalLines
+	logLoadIntervalCount = PattyGraph.intervalsCompleted
 	logLoadGCCost = stats.NumGC
+	mu.Unlock()
 
 	startFileMonitoring() // tails the access log data plane
 	doRandomFact = true

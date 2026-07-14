@@ -560,15 +560,16 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		}
 		args, _ := splitArgsShellStyle(commandLine[len(cmd):])
 		f := args[0]
-		if _, exists := factoidByName[strings.ToLower(f)]; !exists {
+		text, exists := pushFactSnapshotNow(f, args[1:])
+		if !exists {
 			pushErrorNow("Factoid not found: %s", f)
 			result := inlineCommandRejected(cmd, "show_fact", "fact not found")
 			result.Result["fact"] = f
 			return result
 		}
-		pushFactNow(f, args[1:])
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "show_fact")
 		result.Result["fact"] = f
+		result.Result["text"] = strings.TrimSpace(stripBrackets(text))
 		return result
 	case "alert", "ALERT":
 		args, err := splitArgsShellStyle(commandLine[len(cmd):])

@@ -1089,6 +1089,25 @@ func pushFactNow(fName string, args []string) {
 		facts.forced = append(facts.forced, f)
 	}
 }
+
+// pushFactSnapshotNow evaluates an explicitly requested fact once, queues that
+// exact value for the ticker, and returns it for command-result reporting.
+// Scheduled fact generation remains deferred through pushFactNow.
+func pushFactSnapshotNow(fName string, args []string) (string, bool) {
+	f, exists := factoidByName[strings.ToLower(fName)]
+	if !exists {
+		return "", false
+	}
+
+	text := f.Generate(args)
+	snapshot := *f
+	snapshot.Generate = func(_ []string) string { return text }
+	snapshot.args = nil
+	snapshot.cache = ""
+	facts.forced = append(facts.forced, &snapshot)
+	return text, true
+}
+
 func pushPrintNow(msg string) {
 	facts.forced = append(facts.forced, Once(func(_ []string) string {
 		return msg

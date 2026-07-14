@@ -1151,6 +1151,16 @@ func TestInlineFactAcceptsKnownFactName(t *testing.T) {
 	if result.Result["fact"] != "output.paths" {
 		t.Fatalf("fact = %v, want output.paths", result.Result["fact"])
 	}
+	text, ok := result.Result["text"].(string)
+	if !ok {
+		t.Fatalf("fact text = %#v, want string", result.Result["text"])
+	}
+	if !strings.Contains(text, "current.jsonl") || !strings.Contains(text, "current.control") {
+		t.Fatalf("fact text = %q, want output filenames", text)
+	}
+	if strings.Contains(text, "[") || strings.Contains(text, "]") {
+		t.Fatalf("fact text = %q, want JSONL text without display markup", text)
+	}
 	msg, _, _ := facts.Next()
 	if !strings.Contains(msg, "current.jsonl") || !strings.Contains(msg, "current.control") {
 		t.Fatalf("forced factoid = %q, want output filenames", msg)

@@ -11,12 +11,15 @@ import (
 // WordStats is the retained state for one interesting key in an InterestingWordMatcher.
 //
 // Lifecycle:
-//   - newWordStats captures the current line source, current status, User-Agent
-//     tokens, and starts the key at count/primeFlux 1.
+//   - newWordStats captures the current line source, current status, raw
+//     User-Agent baseline, first-hit bytes, and the initial first/interval/latest
+//     examples. IP entries separately retain an independent User-Agent token
+//     baseline in the reusable slice owned by this WordStats.
 //   - match-time updates increment count, bytes, primeFlux, last-seen log time,
 //     retained source examples, capture color, and User-Agent delta state.
 //   - push moves the interval count into history, refreshes primeFlux from recent
-//     history, clears interval counters, and invalidates cached history views.
+//     history, clears interval counters and the interval-first example, and
+//     invalidates cached history views.
 //   - stale non-peak entries are recycled through wordStatsPool so the hot path
 //     can reuse buffers and source holders without repeated allocation.
 //
@@ -31,7 +34,7 @@ import (
 //
 // Invariants:
 //   - primeFlux = count + historyBuf.nFlux(fluxDepth)
-//   - after push, count and bytes are reset for the new interval
+//   - after push, count, bytes, and firstIntervalLogLine are reset for the new interval
 //   - history slice caches are invalidated when history changes
 //   - source points to a reusable lineSource owned by this WordStats instance.
 type WordStats struct {
@@ -152,6 +155,10 @@ func (ws *WordStats) historyAt(i int) int {
 	return ws.historyBuf.At(i)
 }
 
+func (ws *WordStats) retainAgentTokenBaseline(tokens []string) {
+	ws.agentTokensFromSource = append(ws.agentTokensFromSource[:0], tokens...)
+}
+
 var fluxDepth = 3
 
 func (ws *WordStats) push() {
@@ -166,6 +173,7 @@ func (ws *WordStats) push() {
 	ws.count = 0
 	ws.bytes = 0
 	ws.burstiCache = 0
+	ws.firstIntervalLogLine = ""
 }
 
 func (ws *WordStats) historyTotal() int { // EXPENSIVE!!!
@@ -208,15 +216,19 @@ func newWordStats() *WordStats {
 	ws := wordStatsPool.Get().(*WordStats)
 	src := ws.source
 	rb := ws.historyBuf
+	agentTokenBuf := ws.agentTokensFromSource[:0]
 	rb.Reset()
 	*ws = WordStats{
 		count:                 1,
+		bytes:                 uint64(currentLine.bytesValue),
 		primeFlux:             1,
 		historyBuf:            rb,
 		source:                src,
 		lastSeenTic:           logicalCycles,
-		agentTokensFromSource: currentLine.userAgentTokens,
+		agentTokensFromSource: agentTokenBuf,
 		lastStatus:            currentLine.respCode,
+		firstIntervalLogLine:  currentLine.logLine,
+		lastLogLine:           currentLine.logLine,
 	}
 	*src = lineSource{
 		ip:             currentLine.ip,
@@ -228,21 +240,26 @@ func newWordStats() *WordStats {
 		respCode:       currentLine.respCode,
 		bytesValue:     currentLine.bytesValue,
 		referer:        currentLine.referer,
+		userAgent:      currentLine.userAgent,
 	}
 	return ws
 }
 func repopulateWordStats(ws *WordStats) {
 	src := ws.source
 	rb := ws.historyBuf
+	agentTokenBuf := ws.agentTokensFromSource[:0]
 	rb.Reset()
 	*ws = WordStats{
 		count:                 1,
+		bytes:                 uint64(currentLine.bytesValue),
 		primeFlux:             1,
 		historyBuf:            rb,
 		source:                src,
 		lastSeenTic:           logicalCycles,
-		agentTokensFromSource: currentLine.userAgentTokens,
+		agentTokensFromSource: agentTokenBuf,
 		lastStatus:            currentLine.respCode,
+		firstIntervalLogLine:  currentLine.logLine,
+		lastLogLine:           currentLine.logLine,
 	}
 	*src = lineSource{
 		ip:             currentLine.ip,
@@ -254,6 +271,7 @@ func repopulateWordStats(ws *WordStats) {
 		respCode:       currentLine.respCode,
 		bytesValue:     currentLine.bytesValue,
 		referer:        currentLine.referer,
+		userAgent:      currentLine.userAgent,
 	}
 }
 
@@ -263,7 +281,8 @@ func (ws *WordStats) Reset() {
 	} else {
 		ws.historyBuf = &ringBuffer{}
 	}
-	ws.agentTokensFromSource = nil
+	clear(ws.agentTokensFromSource)
+	ws.agentTokensFromSource = ws.agentTokensFromSource[:0]
 	ws.source.captureColor = ""
 	ws.source.captureMatcher = ""
 }

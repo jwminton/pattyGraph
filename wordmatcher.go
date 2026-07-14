@@ -365,10 +365,12 @@ func (m *InterestingWordMatcher) match() bool {
 				// Recycle expired stats and start a fresh entry for this token.
 				recycleWordStats(stats)
 			}
-			m.wordFrequency[word] = newWordStats()
+			stats := newWordStats()
+			m.wordFrequency[word] = stats
 			m.wordStatsCreated++
 			m.lruTracker.MarkSeen(word, 1)
 			if m.ipScratch != nil {
+				stats.retainAgentTokenBaseline(currentLine.userAgentTokens)
 				m.ipScratch.Add(currentLine.ip, currentLine.ipPrefix)
 			}
 			continue

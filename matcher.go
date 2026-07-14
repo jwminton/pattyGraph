@@ -317,6 +317,7 @@ func (m *Matcher) push() {
 	// Reset the intervalCount to 0
 	m.lastIntervalCount = m.intervalCount
 	m.intervalCount = 0
+	m.intervalMatchLine = ""
 
 	// Ensure the history length does not exceed DefaultHistoryDepth
 	if len(m.history) > DefaultHistoryDepth {

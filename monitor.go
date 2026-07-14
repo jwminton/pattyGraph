@@ -159,7 +159,6 @@ type lineSource struct {
 	// Matching-only derived fields; rebuilt for each parsed log line.
 	userAgentTokens   []string
 	replacedUserAgent string
-	cloned            *lineSource
 }
 
 func (l lineSource) isError() bool {

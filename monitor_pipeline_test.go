@@ -153,6 +153,99 @@ func matcherNamesForTest(matchers []MatcherFacade) []string {
 	return names
 }
 
+func TestWordStatsCreationRetainsRawUserAgentBaseline(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	*currentLine = lineSource{
+		logLine:   "first observation",
+		respCode:  "200",
+		userAgent: "StableAgent/1.0",
+	}
+
+	t.Run("new", func(t *testing.T) {
+		stats := newWordStats()
+		if stats.source.userAgent != currentLine.userAgent {
+			t.Fatalf("raw User-Agent baseline = %q, want %q", stats.source.userAgent, currentLine.userAgent)
+		}
+	})
+
+	t.Run("repopulated", func(t *testing.T) {
+		stats := &WordStats{historyBuf: &ringBuffer{}, source: &lineSource{}}
+		repopulateWordStats(stats)
+		if stats.source.userAgent != currentLine.userAgent {
+			t.Fatalf("repopulated raw User-Agent baseline = %q, want %q", stats.source.userAgent, currentLine.userAgent)
+		}
+	})
+}
+
+func TestRepeatedIPUserAgentGuardSkipsUnchangedDistance(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	previousWorkspace := levenshteinWS
+	levenshteinWS.prev = nil
+	levenshteinWS.curr = nil
+	t.Cleanup(func() {
+		levenshteinWS = previousWorkspace
+	})
+
+	const ip = "192.0.2.10"
+	const stableAgent = "Mozilla/5.0 StableAgent/1.0"
+	first := standardPipelineLine(ip, "/first", "200", "123", "-", stableAgent)
+	match(first)
+
+	stats := PattyGraph.ipsMatcher.wordFrequency[ip]
+	if stats == nil {
+		t.Fatal("first IP observation did not create WordStats")
+	}
+	if stats.source.userAgent != stableAgent {
+		t.Fatalf("stored User-Agent baseline = %q, want %q", stats.source.userAgent, stableAgent)
+	}
+	baselineTokens := append([]string(nil), stats.agentTokensFromSource...)
+	if len(baselineTokens) == 0 {
+		t.Fatal("first IP observation did not retain User-Agent tokens")
+	}
+
+	match(first)
+	if cap(levenshteinWS.prev) != 0 || cap(levenshteinWS.curr) != 0 {
+		t.Fatal("unchanged User-Agent invoked token Levenshtein")
+	}
+	if currentLine.userAgentDelta != 0 {
+		t.Fatalf("unchanged User-Agent delta = %f, want 0", currentLine.userAgentDelta)
+	}
+	if !reflect.DeepEqual(stats.agentTokensFromSource, baselineTokens) {
+		t.Fatalf("unchanged line replaced token baseline: got %v, want %v", stats.agentTokensFromSource, baselineTokens)
+	}
+
+	changed := standardPipelineLine(ip, "/changed", "200", "123", "-", "Mozilla/5.0 DifferentAgent/9.0")
+	match(changed)
+	if cap(levenshteinWS.prev) == 0 || cap(levenshteinWS.curr) == 0 {
+		t.Fatal("changed User-Agent did not invoke token Levenshtein")
+	}
+	if currentLine.userAgentDelta == 0 {
+		t.Fatal("changed User-Agent delta = 0, want nonzero")
+	}
+	if !reflect.DeepEqual(stats.agentTokensFromSource, baselineTokens) {
+		t.Fatalf("changed line replaced token baseline: got %v, want %v", stats.agentTokensFromSource, baselineTokens)
+	}
+}
+
+func TestWordStatsAgentTokenBaselineReusesCapacity(t *testing.T) {
+	stats := &WordStats{
+		historyBuf:            &ringBuffer{},
+		source:                &lineSource{},
+		agentTokensFromSource: make([]string, 0, 4),
+	}
+	stats.retainAgentTokenBaseline([]string{"Mozilla", "StableAgent"})
+	firstBackingElement := &stats.agentTokensFromSource[0]
+
+	stats.Reset()
+	if len(stats.agentTokensFromSource) != 0 || cap(stats.agentTokensFromSource) != 4 {
+		t.Fatalf("reset token buffer len/cap = %d/%d, want 0/4", len(stats.agentTokensFromSource), cap(stats.agentTokensFromSource))
+	}
+	stats.retainAgentTokenBaseline([]string{"Mozilla", "DifferentAgent"})
+	if &stats.agentTokensFromSource[0] != firstBackingElement {
+		t.Fatal("retaining a new token baseline replaced reusable capacity")
+	}
+}
+
 func TestNewMonitorNoConfigStartupMatcherShape(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 
