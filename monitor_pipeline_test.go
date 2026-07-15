@@ -6,6 +6,7 @@ package main
 import (
 	"io"
 	"log"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -224,6 +225,46 @@ func TestRepeatedIPUserAgentGuardSkipsUnchangedDistance(t *testing.T) {
 	}
 	if !reflect.DeepEqual(stats.agentTokensFromSource, baselineTokens) {
 		t.Fatalf("changed line replaced token baseline: got %v, want %v", stats.agentTokensFromSource, baselineTokens)
+	}
+}
+
+func TestRepeatedIPUserAgentDistanceUsesRetainedBaseline(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	const ip = "192.0.2.11"
+	const baselineAgent = "Alpha/1 Beta/2 Gamma/3"
+	const shorterAgent = "Alpha/1 Beta/2"
+	baseline := standardPipelineLine(ip, "/first", "200", "123", "-", baselineAgent)
+	shorter := standardPipelineLine(ip, "/later", "200", "123", "-", shorterAgent)
+
+	match(baseline)
+	stats := PattyGraph.ipsMatcher.wordFrequency[ip]
+	if stats == nil {
+		t.Fatal("first IP observation did not create WordStats")
+	}
+	if len(stats.agentTokensFromSource) != 6 {
+		t.Fatalf("baseline token count = %d, want 6: %v", len(stats.agentTokensFromSource), stats.agentTokensFromSource)
+	}
+
+	match(shorter)
+	const wantDelta = 2.0 / 6.0
+	if math.Abs(currentLine.userAgentDelta-wantDelta) > 1e-12 {
+		t.Fatalf("shorter User-Agent delta = %v, want baseline-normalized %v", currentLine.userAgentDelta, wantDelta)
+	}
+	firstMetric := stats.agentDeltaMetric
+	if firstMetric <= 0 || firstMetric >= currentLine.userAgentDelta {
+		t.Fatalf("first accumulated IP delta = %v, want between zero and current delta %v", firstMetric, currentLine.userAgentDelta)
+	}
+
+	match(shorter)
+	if math.Abs(currentLine.userAgentDelta-wantDelta) > 1e-12 {
+		t.Fatalf("repeated shorter User-Agent delta = %v, want retained-baseline delta %v", currentLine.userAgentDelta, wantDelta)
+	}
+	if stats.source.userAgent != baselineAgent || len(stats.agentTokensFromSource) != 6 {
+		t.Fatalf("IP baseline changed: agent %q tokens %v", stats.source.userAgent, stats.agentTokensFromSource)
+	}
+	if stats.agentDeltaMetric <= firstMetric || stats.agentDeltaMetric >= currentLine.userAgentDelta {
+		t.Fatalf("accumulated IP delta = %v, want above %v and below current delta %v", stats.agentDeltaMetric, firstMetric, currentLine.userAgentDelta)
 	}
 }
 

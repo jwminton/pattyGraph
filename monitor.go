@@ -99,7 +99,11 @@ var currentLine = &lineSource{} // line currently being processed; only valid du
 var currentCycle int  // current cycle number counting up to DefaultIntervalSize
 var logicalCycles int // completed or skipped cycles since startup
 
-const BotsMatcherName = "Bots"
+const (
+	BotsMatcherName     = "Bots"
+	BrowserMatcherName  = "Browser"
+	PlatformMatcherName = "Platform"
+)
 
 // botsIndex is the matcher ordering boundary. Rows above Bots compete for a
 // line, Bots receives unclaimed bot-family traffic, and rows below Bots observe

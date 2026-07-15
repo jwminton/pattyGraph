@@ -253,6 +253,55 @@ func TestSidecarDefaultPathUsesConfiguredJSONFile(t *testing.T) {
 	}
 }
 
+func TestSidecarDefaultPathUsesHumanFriendlyFilename(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	if got, want := PattyGraph.SidecarDefaultPath(), defaultSidecarFilename; got != want {
+		t.Fatalf("SidecarDefaultPath without save-dir = %q, want %q", got, want)
+	}
+
+	PattyGraph.pattyConfig.setSaveDir("/tmp/patty")
+	if got, want := PattyGraph.SidecarDefaultPath(), "/tmp/patty/pattyLog.jsonl"; got != want {
+		t.Fatalf("SidecarDefaultPath with save-dir = %q, want %q", got, want)
+	}
+}
+
+func TestSidecarSessionStartTruncatesDefaultJSONFile(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	dir := t.TempDir()
+	PattyGraph.pattyConfig.setSaveDir(dir)
+	path := PattyGraph.SidecarDefaultPath()
+	if err := os.WriteFile(path, []byte("stale session\n"), 0644); err != nil {
+		t.Fatalf("seed default JSONL: %v", err)
+	}
+
+	if err := PattyGraph.WriteSidecarSessionStartJSONL(""); err != nil {
+		t.Fatalf("WriteSidecarSessionStartJSONL: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(data), "stale session") || strings.Count(string(data), "\n") != 1 {
+		t.Fatalf("default JSONL was not replaced with one session marker: %s", data)
+	}
+}
+
+func TestSidecarHelpUsesHumanFriendlyDefaultFilename(t *testing.T) {
+	help := sidecarHelpText()
+	for _, expected := range []string{
+		"<save-dir>/pattyLog.jsonl",
+		"created/truncated at session start",
+		"Use separate --json-file values",
+	} {
+		if !strings.Contains(help, expected) {
+			t.Fatalf("JSONL help missing %q", expected)
+		}
+	}
+	if strings.Contains(help, "pattyLog_<date>") {
+		t.Fatal("JSONL help still describes dated default filenames")
+	}
+}
+
 func TestSidecarSessionStartTruncatesConfiguredJSONFile(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	dir := t.TempDir()

@@ -42,7 +42,7 @@ var flags = []flagInfo{
 	{"flux", "f", DefaultFluxDepth, "Flux is the history depth used for interesting word ranking.", "int"},
 	{"read", "r", DefaultMBToRead, "Number of MB back of logfile to read upon startup", "int"},
 	{"color-index", "l", 0, "Advance the color assignment index for a different look", "int"},
-	{"json", "j", false, "Write PattyLog JSONL interval data to <save-dir>/pattyLog_<date>_<time>_<pid>.jsonl", "bool"},
+	{"json", "j", false, "Write PattyLog JSONL interval data to <save-dir>/pattyLog.jsonl", "bool"},
 	{"json-file", "", "", "Write PattyLog JSONL to a specific file under <save-dir>; implies --json", "string"},
 	{"control", "C", false, "Read inline commands from pattyControl.log in save-dir/current dir", "bool"},
 	{"control-file", "", "", "Read inline commands from a specific file under <save-dir>; implies --control", "string"},
@@ -435,6 +435,19 @@ Matcher Commands:
       Add a matcher with one or more text patterns. Quoted patterns allowed.
       If a flag is given that 'interesting' scope is used. If no flag is given
       the entire log line is searched.
+      Regex matchers scan log lines through Go's regex engine and increase both
+      startup replay and ongoing runtime cost. Startup makes the accumulated
+      cost especially visible on large logs.
+  !!! add --builtin <Bots|Browser|Platform>
+  !!! add <Bots|Browser|Platform> --builtin
+      Add a packaged matcher definition. Browser and Platform default beneath
+      Bots; matcher placement prefixes still apply. Bots has a fixed position,
+      and add/del only enable or disable its automatic promotion behavior.
+      Builtin names are case-insensitive during add and become canonical matcher
+      names; normal case-sensitive matcher name rules apply afterward.
+      Built-ins do not accept patterns or scope flags. For a custom regex use:
+        !!! del Platform
+        !!! add Platform --regex <custom-pattern>
   !!! del <name> 
       Delete a matcher (text after <name> is ignored).
   !!! color <name> <color>
@@ -566,13 +579,18 @@ func printBuiltinWordLists() string {
 	for _, term := range BotsSearchTerms {
 		wordlist.WriteString(fmt.Sprintf("*%s ", term))
 	}
-	wordlist.WriteString("\n\n  Builtin 'Platform' detection regex pattern:\n     ")
+	wordlist.WriteString("\n\n  Optional regex-backed builtins (default beneath Bots):\n")
+	wordlist.WriteString("     !!! add --builtin Browser\n")
+	wordlist.WriteString("     !!! add --builtin Platform\n")
+	wordlist.WriteString("     Regex matching increases startup replay and ongoing runtime cost.\n")
+	wordlist.WriteString("     Startup makes the accumulated cost especially visible on large logs.\n")
+	wordlist.WriteString("\n  Builtin 'Platform' detection regex pattern:\n     ")
 	wordlist.WriteString(platformRegexString)
 	wordlist.WriteString("\n\n  Builtin 'Browser' detection regex pattern:\n     ")
 
 	maxWidth := 70
 	currentLineLen := 0
-	tokens := strings.Split(browsPattern, "|")
+	tokens := strings.Split(browserRegexString, "|")
 
 	for i, token := range tokens {
 		// Keep delimiters in place

@@ -85,6 +85,20 @@ func inlineAddPatterns(args []string, start int) []string {
 	return inlineArgsBeforeComment(args[start:])
 }
 
+func inlineBuiltinError(commandName, builtin, argument, value, message string) InlineCommandResult {
+	result := inlineCommandInvalidArgument(commandName, "add_matcher", argument, value, message)
+	result.Result["builtin"] = builtin
+	result.Result["valid_builtins"] = builtinMatcherNames()
+	if builtin == BrowserMatcherName || builtin == PlatformMatcherName {
+		result.Result["custom_regex_command"] = fmt.Sprintf(
+			InlinePreamble+" add %s --regex <pattern>",
+			builtin,
+		)
+		result.Result["requires_delete_if_present"] = true
+	}
+	return result
+}
+
 // inlineArgsBeforeComment applies the inline language's trailing-comment rule
 // to an already tokenized argument tail. Callers must first consume required
 // values that may legally begin with '#', notably hexadecimal matcher colors.
@@ -198,43 +212,83 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 	// === Matchers Management ===
 	case "ADD", "add":
 		// add uses quote-aware parsing because patterns may contain spaces; scope
-		// flags are accepted before or after the one-token matcher name.
+		// flags are accepted before or after the one-token matcher name. --builtin
+		// selects a packaged matcher definition and reserves the remaining tokens
+		// for an optional trailing comment.
 		args, err := splitArgsShellStyle(commandLine[len(cmd):])
 		if err != nil || len(args) < 1 {
 			return inlineCommandRejected(cmd, "add_matcher", "missing matcher name")
 		}
 
 		isRegex := false
+		isBuiltin := false
 		scopeName := "line"
-		name := args[0]
+		name := ""
 		patternStart := 1
-
-		if inlineAddScopeFlag(args[0]) != "" {
-			if len(args) < 2 {
-				return inlineCommandRejected(cmd, "add_matcher", "missing matcher name")
+		commandArgs := inlineArgsBeforeComment(args)
+		if len(commandArgs) == 0 {
+			return inlineCommandRejected(cmd, "add_matcher", "missing matcher name")
+		}
+		builtinFlagIndex := -1
+		for i, arg := range commandArgs {
+			if arg == "--builtin" {
+				if builtinFlagIndex != -1 {
+					return inlineBuiltinError(cmd, "", "--builtin", arg, "--builtin may only be specified once")
+				}
+				builtinFlagIndex = i
 			}
-			scopeName = inlineAddScopeFlag(args[0])
-			isRegex = args[0] == "--regex"
-			name = args[1]
-			patternStart = 2
-		} else if len(args) > 1 && inlineAddScopeFlag(args[1]) != "" {
-			scopeName = inlineAddScopeFlag(args[1])
-			isRegex = args[1] == "--regex"
-			patternStart = 2
-		} else if strings.HasPrefix(args[0], "--") {
-			result := inlineCommandRejected(cmd, "add_matcher", "matcher name cannot look like a flag")
-			result.Result["raw_matcher_name"] = args[0]
-			return result
 		}
 
-		patterns := inlineAddPatterns(args, patternStart)
+		if builtinFlagIndex >= 0 {
+			isBuiltin = true
+			if builtinFlagIndex > 1 {
+				return inlineBuiltinError(cmd, "", "--builtin", "--builtin", "--builtin must appear immediately before or after the matcher name")
+			}
+			if len(commandArgs) < 2 {
+				return inlineBuiltinError(cmd, "", "builtin", "", "missing built-in matcher name")
+			}
+			if builtinFlagIndex == 0 {
+				name = commandArgs[1]
+			} else {
+				name = commandArgs[0]
+			}
+			patternStart = 2
+		} else if inlineAddScopeFlag(commandArgs[0]) != "" {
+			if len(commandArgs) < 2 {
+				return inlineCommandRejected(cmd, "add_matcher", "missing matcher name")
+			}
+			scopeName = inlineAddScopeFlag(commandArgs[0])
+			isRegex = commandArgs[0] == "--regex"
+			name = commandArgs[1]
+			patternStart = 2
+		} else if len(commandArgs) > 1 && inlineAddScopeFlag(commandArgs[1]) != "" {
+			name = commandArgs[0]
+			scopeName = inlineAddScopeFlag(commandArgs[1])
+			isRegex = commandArgs[1] == "--regex"
+			patternStart = 2
+		} else if strings.HasPrefix(commandArgs[0], "--") {
+			result := inlineCommandRejected(cmd, "add_matcher", "matcher name cannot look like a flag")
+			result.Result["raw_matcher_name"] = commandArgs[0]
+			return result
+		} else {
+			name = commandArgs[0]
+		}
+
+		patterns := inlineAddPatterns(commandArgs, patternStart)
 
 		originalName := name
+		hasPlacementModifier := false
+		if name == "" {
+			return inlineCommandRejected(cmd, "add_matcher", "missing matcher name")
+		}
 		if name[0:1] == "*" {
+			hasPlacementModifier = true
 			name = name[1:]
 		} else if name[0:1] == "+" {
+			hasPlacementModifier = true
 			name = name[1:]
 		} else if name[0:1] == "-" {
+			hasPlacementModifier = true
 			name = name[1:]
 		}
 		if name == "" {
@@ -260,45 +314,82 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			result.Result["normalized_matcher_name"] = name
 			return result
 		}
+		if isBuiltin {
+			canonicalName, ok := canonicalBuiltinMatcherName(name)
+			if !ok {
+				return inlineBuiltinError(
+					cmd,
+					name,
+					"builtin",
+					name,
+					fmt.Sprintf("unknown built-in matcher %q; valid built-ins are %s", name, strings.Join(builtinMatcherNames(), ", ")),
+				)
+			}
+			name = canonicalName
+			if len(patterns) > 0 {
+				if name == BotsMatcherName {
+					return inlineBuiltinError(
+						cmd,
+						name,
+						"arguments",
+						strings.Join(patterns, " "),
+						"built-in Bots uses fixed detection behavior and does not accept patterns or scope flags",
+					)
+				}
+				return inlineBuiltinError(
+					cmd,
+					name,
+					"patterns",
+					strings.Join(patterns, " "),
+					fmt.Sprintf("built-in %s uses its packaged pattern; for a custom regex use %q after deleting the existing matcher if it is active", name, InlinePreamble+" add "+name+" --regex <pattern>"),
+				)
+			}
+		}
 		if name == BotsMatcherName {
+			if hasPlacementModifier {
+				return inlineBuiltinError(cmd, name, "placement", originalName, "built-in Bots has a fixed matcher position and does not accept placement modifiers")
+			}
+			if len(patterns) > 0 || (!isBuiltin && patternStart > 1) {
+				return inlineBuiltinError(
+					cmd,
+					name,
+					"arguments",
+					strings.Join(patterns, " "),
+					"built-in Bots uses fixed detection behavior and does not accept patterns or scope flags",
+				)
+			}
 			toggleBotsMatcher(false)
 			result := inlineCommandResult(cmd, InlineCommandStatusApplied, "enable_bots_auto_add")
 			result.Result["matcher_name"] = name
+			result.Result["builtin"] = BotsMatcherName
 			return result
 		}
 
-		if len(patterns) == 0 {
-			if name == "Browser" || name == "Platform" {
-				isRegex = true
-			} else {
-				patterns = []string{name}
-			}
+		if !isBuiltin && len(patterns) == 0 {
+			patterns = []string{name}
 		}
 		if matcherNameExists(name) {
 			return inlineCommandRejected(cmd, "add_matcher", "duplicate matcher name")
 		}
 		//newM := PattyGraph.createMatcher(name, isLikelyIPPattern(name), patterns)
 		var newM *Matcher
-		if isRegex {
-			if name == "Browser" && len(patterns) == 0 {
-				newM = newRegexMatcher(name, browserRegexString)
-			} else if name == "Platform" && len(patterns) == 0 {
-				newM = newRegexMatcher(name, platformRegexString)
-			} else {
-				pattern := strings.Join(patterns, " ")
-				if _, err := regexp.Compile(pattern); err != nil {
-					result := inlineCommandInvalidArgument(
-						cmd,
-						"add_matcher",
-						"regex",
-						pattern,
-						fmt.Sprintf("invalid regex pattern: %v", err),
-					)
-					result.Result["matcher_name"] = name
-					return result
-				}
-				newM = newRegexMatcher(name, pattern)
+		builtinPattern := ""
+		if isBuiltin {
+			newM, builtinPattern, _ = newOptionalBuiltinMatcher(name)
+		} else if isRegex {
+			pattern := strings.Join(patterns, " ")
+			if _, err := regexp.Compile(pattern); err != nil {
+				result := inlineCommandInvalidArgument(
+					cmd,
+					"add_matcher",
+					"regex",
+					pattern,
+					fmt.Sprintf("invalid regex pattern: %v", err),
+				)
+				result.Result["matcher_name"] = name
+				return result
 			}
+			newM = newRegexMatcher(name, pattern)
 		} else {
 			switch scopeName {
 			case "words":
@@ -321,6 +412,10 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		}
 		placement := "before_bots"
 		placementMode := matcherBeforeBots
+		if isBuiltin {
+			placement = "before_lines"
+			placementMode = matcherBeforeLines
+		}
 		// Name prefixes choose the matcher lane: + goes first in the
 		// competitive lane, -/default goes immediately before Bots, and * goes
 		// below Bots before system rows so it observes instead of competes.
@@ -335,7 +430,10 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			placement = "before_bots"
 			placementMode = matcherBeforeBots
 		default:
-			if len(newM.history) > 0 {
+			if isBuiltin {
+				placement = "before_lines"
+				placementMode = matcherBeforeLines
+			} else if len(newM.history) > 0 {
 				placement = "first"
 				placementMode = matcherFirst
 			} else {
@@ -352,8 +450,14 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		result.Result["matcher_name"] = name
 		result.Result["placement"] = placement
 		result.Result["scope"] = scopeName
-		result.Result["patterns"] = patterns
-		result.Result["regex"] = isRegex
+		if isBuiltin {
+			result.Result["builtin"] = name
+			result.Result["patterns"] = []string{builtinPattern}
+			result.Result["regex"] = true
+		} else {
+			result.Result["patterns"] = patterns
+			result.Result["regex"] = isRegex
+		}
 		return result
 	case "select", "SELECT":
 		args, err := splitArgsShellStyle(commandLine[len(cmd):])

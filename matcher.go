@@ -882,16 +882,46 @@ func sharedSystemDisplayFunc(displayColor, stressColor string) string {
 	return displayColor + "%-10.10s" + stressColor + "%4s%s" + displayColor + "%4s%1s%s[-:-]\n"
 }
 
-// Browser/platform patterns are retained for matcher experiments and future browser-family grouping.
+// Browser/platform patterns back optional built-in matchers. They remain out of
+// the default pipeline and are only compiled when explicitly requested.
 const browserRegexString = `(?i)\b(Chrome|CriOS|Firefox|FxiOS|Safari|DuckDuckGo|Edg|Edge|OPR|MSIE|Trident|Brave|PlayStation|Vivaldi|Baidu|SeaMonkey|Maxthon|Puffin|Silk|Sogou|Dolfin|IceCat|Iceweasel|Waterfox|K-Meleon|PaleMoon|Avant|Epiphany)[/\s]?`
 const platformRegexString = `(?i)(Windows|Android|iPhone|Mac OS)`
+
+func builtinMatcherNames() []string {
+	return []string{BotsMatcherName, BrowserMatcherName, PlatformMatcherName}
+}
+
+func canonicalBuiltinMatcherName(name string) (string, bool) {
+	for _, builtinName := range builtinMatcherNames() {
+		if strings.EqualFold(name, builtinName) {
+			return builtinName, true
+		}
+	}
+	return "", false
+}
+
+func optionalBuiltinMatcherPattern(name string) (string, bool) {
+	switch name {
+	case BrowserMatcherName:
+		return browserRegexString, true
+	case PlatformMatcherName:
+		return platformRegexString, true
+	default:
+		return "", false
+	}
+}
+
+func newOptionalBuiltinMatcher(name string) (*Matcher, string, bool) {
+	pattern, ok := optionalBuiltinMatcherPattern(name)
+	if !ok {
+		return nil, "", false
+	}
+	return newRegexMatcher(name, pattern), pattern, true
+}
 
 // Instead of subclassing for the simple cases, inject behavior function pointers for specific behavior overrides
 func MatcherFactory(matcherType string) *Matcher {
 	switch matcherType {
-	// Here for when included as part of startup, inline commands not processed here
-	case "Browser":
-		return newRegexMatcher(matcherType, browserRegexString)
 	case BotsMatcherName:
 		botsMatcher := NewPredicateMatcher(BotsMatcherName)
 		botsMatcher.predicateFuncs = []func() (bool, [][]string){isBotUAFaster}

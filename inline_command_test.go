@@ -393,6 +393,302 @@ func TestInlineDelBotsDisablesAutoAdd(t *testing.T) {
 	}
 }
 
+func TestInlineAddOptionalBuiltinsDefaultBelowBots(t *testing.T) {
+	tests := []struct {
+		name       string
+		command    string
+		builtin    string
+		pattern    string
+		matchingUA string
+	}{
+		{
+			name:       "Browser flag first",
+			command:    "!!! add --builtin browser # stock browser",
+			builtin:    BrowserMatcherName,
+			pattern:    browserRegexString,
+			matchingUA: "Mozilla/5.0 Chrome/126.0",
+		},
+		{
+			name:       "Platform flag second",
+			command:    "!!! add Platform --builtin # stock platform",
+			builtin:    PlatformMatcherName,
+			pattern:    platformRegexString,
+			matchingUA: "Mozilla/5.0 (FreeBSD) Android",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMonitorPipelineTestGraph()
+			result := invokeInlineCommand(tt.command)
+			if result.Status != InlineCommandStatusApplied {
+				t.Fatalf("status = %q, want applied: %#v", result.Status, result.Result)
+			}
+			if result.Result["builtin"] != tt.builtin || result.Result["regex"] != true {
+				t.Fatalf("built-in result = %#v", result.Result)
+			}
+			patterns, ok := result.Result["patterns"].([]string)
+			if !ok || len(patterns) != 1 || patterns[0] != tt.pattern {
+				t.Fatalf("patterns = %#v, want packaged pattern %q", result.Result["patterns"], tt.pattern)
+			}
+			index := matcherIndexByNameForTest(tt.builtin)
+			if index <= botsIndex || index != matcherIndexByNameForTest("lines")-1 {
+				t.Fatalf("%s index = %d, Bots = %d, lines = %d", tt.builtin, index, botsIndex, matcherIndexByNameForTest("lines"))
+			}
+			matcher := findMatcherByName(tt.builtin)
+			*currentLine = lineSource{logLine: tt.matchingUA, ip: "192.0.2.20"}
+			if matcher == nil || !matcher.match() {
+				t.Fatalf("built-in %s did not match %q", tt.builtin, tt.matchingUA)
+			}
+			if got := matcher.asInlineCommand(); got != tt.command {
+				t.Fatalf("inline command = %q, want retained %q", got, tt.command)
+			}
+		})
+	}
+}
+
+func TestInlineAddOptionalBuiltinPlacementModifiers(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		check   func(index int) bool
+	}{
+		{name: "top", command: "!!! add --builtin +Browser", check: func(index int) bool { return index == 0 }},
+		{name: "above Bots", command: "!!! add --builtin -Browser", check: func(index int) bool { return index == botsIndex-1 }},
+		{name: "beneath Bots", command: "!!! add --builtin *Browser", check: func(index int) bool {
+			return index > botsIndex && index == matcherIndexByNameForTest("lines")-1
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMonitorPipelineTestGraph()
+			result := invokeInlineCommand(tt.command)
+			if result.Status != InlineCommandStatusApplied {
+				t.Fatalf("status = %q, want applied: %#v", result.Status, result.Result)
+			}
+			if index := matcherIndexByNameForTest(BrowserMatcherName); !tt.check(index) {
+				t.Fatalf("Browser index = %d, Bots = %d, lines = %d", index, botsIndex, matcherIndexByNameForTest("lines"))
+			}
+		})
+	}
+}
+
+func TestInlinePlainBuiltinNamesCreateLiteralMatchers(t *testing.T) {
+	for _, name := range []string{BrowserMatcherName, PlatformMatcherName} {
+		t.Run(name, func(t *testing.T) {
+			setupMonitorPipelineTestGraph()
+			result := invokeInlineCommand("!!! add " + name)
+			if result.Status != InlineCommandStatusApplied || result.Result["regex"] != false {
+				t.Fatalf("literal add result = %#v", result)
+			}
+			if _, exists := result.Result["builtin"]; exists {
+				t.Fatalf("plain add reported built-in metadata: %#v", result.Result)
+			}
+			matcher := findMatcherByName(name)
+			*currentLine = lineSource{logLine: "Mozilla/5.0 Chrome/126.0 Android", ip: "192.0.2.21"}
+			if matcher == nil || matcher.match() {
+				t.Fatalf("literal %s unexpectedly matched packaged Browser/Platform content", name)
+			}
+			currentLine.logLine = "request contains " + name
+			if !matcher.match() {
+				t.Fatalf("literal %s did not match its own name", name)
+			}
+		})
+	}
+}
+
+func TestInlineOptionalBuiltinCanBeReplacedByCustomRegex(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	if result := invokeInlineCommand("!!! add --builtin Platform"); result.Status != InlineCommandStatusApplied {
+		t.Fatalf("built-in add = %#v", result)
+	}
+	if result := invokeInlineCommand("!!! del Platform"); result.Status != InlineCommandStatusApplied {
+		t.Fatalf("built-in delete = %#v", result)
+	}
+	result := invokeInlineCommand(`!!! add Platform --regex (FreeBSD|OpenBSD)`)
+	if result.Status != InlineCommandStatusApplied || result.Result["regex"] != true {
+		t.Fatalf("custom regex add = %#v", result)
+	}
+	if _, exists := result.Result["builtin"]; exists {
+		t.Fatalf("custom matcher reported built-in metadata: %#v", result.Result)
+	}
+	matcher := findMatcherByName(PlatformMatcherName)
+	*currentLine = lineSource{logLine: "Mozilla/5.0 FreeBSD", ip: "192.0.2.22"}
+	if matcher == nil || !matcher.match() {
+		t.Fatal("custom Platform regex did not match FreeBSD")
+	}
+}
+
+func TestInlineBuiltinCommentSurvivesConfigGeneration(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	const command = "!!! add --builtin Browser #stock broswer here"
+	result := invokeInlineCommand(command)
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want applied: %#v", result.Status, result.Result)
+	}
+	var config strings.Builder
+	if err := writeConfig(&config); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+	if !strings.Contains(config.String(), command+"\n") {
+		t.Fatalf("generated config did not preserve declaration %q:\n%s", command, config.String())
+	}
+}
+
+func TestInlineBuiltinRejectsCustomPatternsWithGuidance(t *testing.T) {
+	for _, command := range []string{
+		`!!! add --builtin Browser (Chrome|Lynx)`,
+		`!!! add Platform --builtin --regex (FreeBSD|OpenBSD)`,
+		`!!! add --builtin Browser --words`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			setupMonitorPipelineTestGraph()
+			result := invokeInlineCommand(command)
+			if result.Status != InlineCommandStatusRejected {
+				t.Fatalf("status = %q, want rejected: %#v", result.Status, result.Result)
+			}
+			builtin, _ := result.Result["builtin"].(string)
+			if builtin != BrowserMatcherName && builtin != PlatformMatcherName {
+				t.Fatalf("builtin = %q, want Browser or Platform", builtin)
+			}
+			wantCommand := InlinePreamble + " add " + builtin + " --regex <pattern>"
+			if result.Result["custom_regex_command"] != wantCommand || result.Result["requires_delete_if_present"] != true {
+				t.Fatalf("custom guidance = %#v", result.Result)
+			}
+			if !strings.Contains(fmt.Sprint(result.Result["error"]), "packaged pattern") {
+				t.Fatalf("error = %v, want packaged-pattern guidance", result.Result["error"])
+			}
+		})
+	}
+}
+
+func TestInlineBuiltinValidationAndBotsSpecialCase(t *testing.T) {
+	t.Run("unknown", func(t *testing.T) {
+		setupMonitorPipelineTestGraph()
+		result := invokeInlineCommand("!!! add --builtin Unknown")
+		if result.Status != InlineCommandStatusRejected || result.Result["argument"] != "builtin" {
+			t.Fatalf("unknown result = %#v", result)
+		}
+		if names, ok := result.Result["valid_builtins"].([]string); !ok || len(names) != 3 {
+			t.Fatalf("valid_builtins = %#v", result.Result["valid_builtins"])
+		}
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		setupMonitorPipelineTestGraph()
+		result := invokeInlineCommand("!!! add --builtin # choose later")
+		if result.Status != InlineCommandStatusRejected || result.Result["argument"] != "builtin" {
+			t.Fatalf("missing result = %#v", result)
+		}
+	})
+
+	t.Run("Bots", func(t *testing.T) {
+		setupMonitorPipelineTestGraph()
+		PattyGraph.botsMatcher.disableAutoAdd = true
+		result := invokeInlineCommand("!!! add --builtin Bots")
+		if result.Status != InlineCommandStatusApplied || result.Result["action"] != "enable_bots_auto_add" {
+			t.Fatalf("Bots result = %#v", result)
+		}
+		if PattyGraph.botsMatcher.disableAutoAdd || matcherCountByNameForTest(BotsMatcherName) != 1 {
+			t.Fatalf("Bots state after add: disabled=%v count=%d", PattyGraph.botsMatcher.disableAutoAdd, matcherCountByNameForTest(BotsMatcherName))
+		}
+	})
+
+	for _, command := range []string{
+		"!!! add --builtin +Bots",
+		"!!! add --builtin Bots bot-pattern",
+		"!!! add Bots bot-pattern",
+		"!!! add Bots --words",
+	} {
+		t.Run(command, func(t *testing.T) {
+			setupMonitorPipelineTestGraph()
+			result := invokeInlineCommand(command)
+			if result.Status != InlineCommandStatusRejected || result.Result["builtin"] != BotsMatcherName {
+				t.Fatalf("Bots rejection = %#v", result)
+			}
+			if matcherCountByNameForTest(BotsMatcherName) != 1 {
+				t.Fatalf("Bots matcher count = %d, want 1", matcherCountByNameForTest(BotsMatcherName))
+			}
+		})
+	}
+}
+
+func TestInlineBuiltinNamesAreCaseInsensitiveOnlyDuringAdd(t *testing.T) {
+	tests := []struct {
+		command       string
+		canonicalName string
+	}{
+		{command: "!!! add --builtin BROWSER", canonicalName: BrowserMatcherName},
+		{command: "!!! add pLaTfOrM --builtin", canonicalName: PlatformMatcherName},
+		{command: "!!! add --builtin bots", canonicalName: BotsMatcherName},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			setupMonitorPipelineTestGraph()
+			if tt.canonicalName == BotsMatcherName {
+				PattyGraph.botsMatcher.disableAutoAdd = true
+			}
+			result := invokeInlineCommand(tt.command)
+			if result.Status != InlineCommandStatusApplied {
+				t.Fatalf("status = %q, want applied: %#v", result.Status, result.Result)
+			}
+			if result.Result["matcher_name"] != tt.canonicalName || result.Result["builtin"] != tt.canonicalName {
+				t.Fatalf("canonical result = %#v, want %q", result.Result, tt.canonicalName)
+			}
+			if matcherCountByNameForTest(tt.canonicalName) != 1 {
+				t.Fatalf("canonical matcher %q count = %d, want 1", tt.canonicalName, matcherCountByNameForTest(tt.canonicalName))
+			}
+		})
+	}
+
+	setupMonitorPipelineTestGraph()
+	if result := invokeInlineCommand("!!! add --builtin browser"); result.Status != InlineCommandStatusApplied {
+		t.Fatalf("lowercase built-in add = %#v", result)
+	}
+	if result := invokeInlineCommand("!!! del browser"); result.Status != InlineCommandStatusRejected {
+		t.Fatalf("lowercase matcher delete status = %q, want rejected", result.Status)
+	}
+	if matcherIndexByNameForTest(BrowserMatcherName) == -1 {
+		t.Fatal("case-mismatched delete removed canonical Browser matcher")
+	}
+	if result := invokeInlineCommand("!!! del Browser"); result.Status != InlineCommandStatusApplied {
+		t.Fatalf("canonical matcher delete = %#v", result)
+	}
+}
+
+func TestBuiltinHelpUsesPackagedPatternsAndCommands(t *testing.T) {
+	wordsHelp := printBuiltinWordLists()
+	normalizedWordsHelp := strings.ReplaceAll(wordsHelp, "\n     ", "")
+	for _, expected := range []string{
+		"!!! add --builtin Browser",
+		"!!! add --builtin Platform",
+		"Regex matching increases startup replay and ongoing runtime cost.",
+	} {
+		if !strings.Contains(wordsHelp, expected) {
+			t.Fatalf("--help words missing %q", expected)
+		}
+	}
+	for _, expected := range []string{browserRegexString, platformRegexString} {
+		if !strings.Contains(normalizedWordsHelp, expected) {
+			t.Fatalf("--help words missing packaged pattern %q", expected)
+		}
+	}
+	inlineHelp := inlineCommandHelp()
+	for _, expected := range []string{
+		"!!! add --builtin <Bots|Browser|Platform>",
+		"Browser and Platform default beneath",
+		"!!! add Platform --regex <custom-pattern>",
+		"Regex matchers scan log lines through Go's regex engine",
+		"startup replay and ongoing runtime cost",
+	} {
+		if !strings.Contains(inlineHelp, expected) {
+			t.Fatalf("--help inline missing %q", expected)
+		}
+	}
+}
+
 func TestInlineSelectInterestingMatcherByKey(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	refs := PattyGraph.refsMatcher

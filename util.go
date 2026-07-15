@@ -134,12 +134,6 @@ var commonWordList = []string{
 	"like", "Version", "Build", "Nexus", "AppleWebKit", "https:", "compatible", // User-Agent words to ignore and misc terms
 }
 
-var browsPattern = `(Chrome|CriOS|Firefox|FxiOS|Safari|DuckDuckGo|` +
-	`Edg|Edge|OPR|FxiOS|MSIE|Trident|Brave|PlayStation|Vivaldi|Baidu|SeaMonkey|Maxthon|Puffin|` +
-	`Silk|Sogou|Dolfin|IceCat|Iceweasel|Waterfox|` + // extra niche platforms
-	`K-Meleon|PaleMoon|Avant|Epiphany|` + // extra niche platforms
-	`\w{2,} ?[Bb]rowser)+`
-
 // Original capture pattern. Too historical to just drop from code.
 // Much of original bot detection was based on this
 //var ipCapturePattern = `^"([^"]*?)" (\d+) (\d+) "([^"]*?)" "(.*?)"$`
@@ -754,8 +748,10 @@ func levenshteinTokensRatio(tokensA, tokensB []string) float64 {
 	if lenA == 0 || lenB == 0 {
 		return 2.0
 	}
+	baselineLen := lenA
 
-	// Always iterate with the shorter sequence as tokensA to reduce space
+	// Iterate with the shorter sequence as tokensA to reduce scratch space, but
+	// normalize against the retained first-seen User-Agent baseline.
 	if lenA > lenB {
 		tokensA, tokensB = tokensB, tokensA
 		lenA, lenB = lenB, lenA
@@ -787,7 +783,7 @@ func levenshteinTokensRatio(tokensA, tokensB []string) float64 {
 	}
 
 	// prev now holds the final result
-	return float64(prev[lenA]) / float64(lenA)
+	return float64(prev[lenA]) / float64(baselineLen)
 }
 
 // Map month string to number

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"math"
 	"reflect"
 	"testing"
 )
@@ -42,6 +43,32 @@ func TestTokensForIps(t *testing.T) {
 	want := []string{"192.0.2.10"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tokensForIps() = %v, want %v", got, want)
+	}
+}
+
+func TestLevenshteinTokensRatioUsesFirstSequenceAsBaseline(t *testing.T) {
+	tests := []struct {
+		name     string
+		baseline []string
+		current  []string
+		want     float64
+	}{
+		{name: "equal", baseline: []string{"a", "b", "c"}, current: []string{"a", "b", "c"}, want: 0},
+		{name: "substitution", baseline: []string{"a", "b", "c", "d"}, current: []string{"a", "b", "x", "d"}, want: 0.25},
+		{name: "insertion", baseline: []string{"a", "b"}, current: []string{"a", "x", "b"}, want: 0.5},
+		{name: "deletion", baseline: []string{"a", "b", "c"}, current: []string{"a", "c"}, want: 1.0 / 3.0},
+		{name: "unrelated", baseline: []string{"a", "b", "c"}, current: []string{"x", "y", "z"}, want: 1},
+		{name: "empty baseline", baseline: nil, current: []string{"a"}, want: 2},
+		{name: "empty current", baseline: []string{"a"}, current: nil, want: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := levenshteinTokensRatio(tt.baseline, tt.current)
+			if math.Abs(got-tt.want) > 1e-12 {
+				t.Fatalf("levenshteinTokensRatio() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
