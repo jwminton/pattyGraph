@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.7
+
+Strengthens PattyGraph's live control surfaces, retained metrics, and default
+operator workflow after `v0.1.6`.
+
+- Hardened inline-command validation with clearer structured rejection details.
+- Added concise factoid feedback for interesting-item selection, generated
+  files, and active output paths.
+- Centralized dynamic matcher placement and clarified matcher selection
+  gestures in the TUI.
+- Corrected first-hit bytes, retained source examples, User-Agent baselines,
+  and IP-prefix metrics exported through PattyLog.
+- Introduced named secondary views while preserving the established Tab-cycle
+  metrics and display behavior.
+- Added explicit built-in matcher creation for `Bots`, `Browser`, and
+  `Platform`, including canonical naming and regex cost guidance.
+- Made `json on` use the predictable `<save-dir>/pattyLog.jsonl` default while
+  retaining explicit `--json-file` naming for automation and concurrent use.
+
 ## 0.1.6
 
 Improves PattyGraph's live usability and operational feedback after `v0.1.5`.

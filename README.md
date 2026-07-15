@@ -70,7 +70,7 @@ mkdir -p ./splats
 ```
 
 Prebuilt Linux binaries are available from the
-[v0.1.6 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.6).
+[v0.1.7 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.7).
 
 Useful built-in references:
 
