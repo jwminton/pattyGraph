@@ -394,6 +394,13 @@ To schedule a factoid to appear immediately in the ticker:
   echo '!!! fact most.active'      >> access.log
   echo '!!! fact ips.prefixes'     >> access.log
 
+To print a one-time annotation in the ticker and PattyLog command stream:
+  echo '!!! fact print deployment started # edge pool' >> access.log
+
+For 'fact print', all text after 'print' is the message. '#' remains message
+text rather than starting a comment. Full tview color/style tags are accepted.
+Messages are limited to 1024 bytes and 256 visible characters.
+
 Factoid names are case-insensitive.
 
 `
@@ -539,6 +546,8 @@ Misc Commands:
       Toggle Factoid History display (same as selecting Ticker) 
   !!! fact <fact.name>
       Injects named factoid as the next factoid. See '--help inline'
+  !!! fact print <message>
+      Print a one-time Note in the Ticker. The complete message, including '#', is retained.
 Persistence & Export:
   !!! pattySplat
       Save the current screen state to a timestamped file.

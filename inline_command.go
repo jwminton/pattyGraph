@@ -14,6 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
+
+	"github.com/rivo/tview"
 )
 
 // Inline commands are PattyGraph's shared configuration and control language.
@@ -61,6 +64,11 @@ func inlineCommandInvalidArgument(commandName, action, argument, value, message 
 type InlineCommandOptions struct {
 	allowCreateSaveDir bool
 }
+
+const (
+	inlinePrintMaxBytes   = 1024
+	inlinePrintMaxVisible = 256
+)
 
 func inlineAddScopeFlag(value string) string {
 	switch value {
@@ -111,6 +119,52 @@ func inlineArgsBeforeComment(args []string) []string {
 		out = append(out, arg)
 	}
 	return out
+}
+
+func inlineFactNameAndRawRemainder(commandLine, commandName string) (string, string) {
+	tail := strings.TrimLeftFunc(commandLine[len(commandName):], unicode.IsSpace)
+	if tail == "" {
+		return "", ""
+	}
+	nameEnd := strings.IndexFunc(tail, unicode.IsSpace)
+	if nameEnd < 0 {
+		return tail, ""
+	}
+	return tail[:nameEnd], strings.TrimSpace(tail[nameEnd:])
+}
+
+func inlineArgumentPreview(value string) string {
+	const maxRunes = 80
+	if utf8.RuneCountInString(value) <= maxRunes {
+		return value
+	}
+	runes := []rune(value)
+	return string(runes[:maxRunes]) + "..."
+}
+
+func validateInlinePrintMessage(message string) string {
+	if message == "" {
+		return "fact print requires message text"
+	}
+	if !utf8.ValidString(message) {
+		return "fact print requires valid UTF-8 text"
+	}
+	if len(message) > inlinePrintMaxBytes {
+		return fmt.Sprintf("fact print message must be %d bytes or fewer", inlinePrintMaxBytes)
+	}
+	for _, r := range message {
+		if unicode.IsControl(r) {
+			return "fact print message cannot contain control characters"
+		}
+	}
+	visibleWidth := tview.TaggedStringWidth(message)
+	if visibleWidth > inlinePrintMaxVisible {
+		return fmt.Sprintf("fact print message must be %d visible characters or fewer", inlinePrintMaxVisible)
+	}
+	if visibleWidth == 0 {
+		return "fact print requires visible message text"
+	}
+	return ""
 }
 
 func normalizeMatcherCommandName(name string) string {
@@ -659,10 +713,31 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		return result
 
 	case "fact":
-		if len(tokens) < 2 {
+		factName, rawRemainder := inlineFactNameAndRawRemainder(commandLine, cmd)
+		if factName == "" {
 			return inlineCommandRejected(cmd, "show_fact", "missing fact name")
 		}
-		args, _ := splitArgsShellStyle(commandLine[len(cmd):])
+		if strings.EqualFold(factName, "print") {
+			if message := validateInlinePrintMessage(rawRemainder); message != "" {
+				return inlineCommandInvalidArgument(
+					cmd,
+					"show_fact",
+					"message",
+					inlineArgumentPreview(rawRemainder),
+					message,
+				)
+			}
+			text, _ := pushFactSnapshotNow("print", []string{rawRemainder})
+			result := inlineCommandResult(cmd, InlineCommandStatusApplied, "show_fact")
+			result.Result["fact"] = "print"
+			result.Result["text"] = strings.TrimSpace(stripBrackets(text))
+			return result
+		}
+
+		args, err := splitArgsShellStyle(commandLine[len(cmd):])
+		if err != nil || len(args) == 0 {
+			return inlineCommandInvalidArgument(cmd, "show_fact", "fact", factName, "invalid fact name")
+		}
 		f := args[0]
 		text, exists := pushFactSnapshotNow(f, args[1:])
 		if !exists {
@@ -1099,9 +1174,17 @@ func writeConfig(w io.Writer) error {
 		if err := write(InlinePreamble+" json-file '%s'\n", PattyGraph.pattyConfig.jsonFileOriginal); err != nil {
 			return err
 		}
+	} else if generateSidecarJSONL {
+		if err := write(InlinePreamble + " json on\n"); err != nil {
+			return err
+		}
 	}
 	if PattyGraph.pattyConfig.controlFileOriginal != "" {
 		if err := write(InlinePreamble+" control-file '%s'\n", PattyGraph.pattyConfig.controlFileOriginal); err != nil {
+			return err
+		}
+	} else if enableControlFile {
+		if err := write(InlinePreamble + " control on\n"); err != nil {
 			return err
 		}
 	}

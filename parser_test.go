@@ -4,6 +4,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -141,6 +144,31 @@ func TestParseNginxTimeFastInvalidMonth(t *testing.T) {
 
 	if _, err := parseNginxTimeFast(line); err == nil {
 		t.Fatal("parseNginxTimeFast() error = nil, want error")
+	}
+}
+
+func TestPreloadGroupingIgnoresHistoricalInlineCommands(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "access.log")
+	lines := []string{
+		`192.0.2.10 - - [13/May/2026:14:22:31 -0700] "GET /before HTTP/1.1" 200 12 "-" "curl/8.0"`,
+		`!!! fact print historical marker # ignored during preload`,
+		`192.0.2.11 - - [13/May/2026:14:22:45 -0700] "GET /after HTTP/1.1" 200 13 "-" "curl/8.0"`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	groups, err := groupLinesByMinuteInMb(path, 1)
+	if err != nil {
+		t.Fatalf("groupLinesByMinuteInMb: %v", err)
+	}
+	if len(groups) != 1 || len(groups[0].Lines) != 2 {
+		t.Fatalf("groups = %#v, want one minute containing two NGINX lines", groups)
+	}
+	for _, line := range groups[0].Lines {
+		if strings.HasPrefix(line, InlinePreamble) {
+			t.Fatalf("historical inline command entered preload group: %q", line)
+		}
 	}
 }
 

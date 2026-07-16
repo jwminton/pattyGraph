@@ -292,6 +292,8 @@ func TestSidecarHelpUsesHumanFriendlyDefaultFilename(t *testing.T) {
 		"<save-dir>/pattyLog.jsonl",
 		"created/truncated at session start",
 		"Use separate --json-file values",
+		"actively tailed access log",
+		"Historical inline-looking lines",
 	} {
 		if !strings.Contains(help, expected) {
 			t.Fatalf("JSONL help missing %q", expected)
@@ -436,6 +438,94 @@ func TestSidecarControlCommandIncludesRequestedFactText(t *testing.T) {
 	}
 	if event.Result["text"] != "Init(1s250ms):17min history" {
 		t.Fatalf("text = %q, want rendered init.history fact", event.Result["text"])
+	}
+}
+
+func TestActiveAccessLogInlineCommandsWriteControlEvents(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	path := filepath.Join(t.TempDir(), "pattyLog.jsonl")
+	PattyGraph.pattyConfig.setJSONFile(path)
+	generateSidecarJSONL = true
+	facts.forced = nil
+
+	commands := []string{
+		"!!! fact print [yellow]deployment started # edge pool",
+		"!!! push 1",
+	}
+	for _, command := range commands {
+		match(command)
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	var events []SidecarControlCommand
+	for decoder.More() {
+		var event SidecarControlCommand
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		events = append(events, event)
+	}
+	if len(events) != len(commands) {
+		t.Fatalf("events = %d, want %d", len(events), len(commands))
+	}
+	for i, event := range events {
+		if event.EventType != SidecarEventControlCommand || event.Source != "access_log" {
+			t.Fatalf("event %d type/source = %q/%q", i, event.EventType, event.Source)
+		}
+		if event.Command != commands[i] || event.Status != InlineCommandStatusApplied {
+			t.Fatalf("event %d = %#v, want command %q applied", i, event, commands[i])
+		}
+	}
+	if events[0].Result["fact"] != "print" || events[0].Result["text"] != "Note: deployment started # edge pool" {
+		t.Fatalf("print result = %#v", events[0].Result)
+	}
+}
+
+func TestActiveAccessLogJSONOffRecordsItsResult(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	path := filepath.Join(t.TempDir(), "pattyLog.jsonl")
+	PattyGraph.pattyConfig.setJSONFile(path)
+	generateSidecarJSONL = true
+
+	match("!!! json off")
+
+	if generateSidecarJSONL {
+		t.Fatal("json off did not disable sidecar output")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), `"source":"access_log"`) ||
+		!strings.Contains(string(data), `"command":"!!! json off"`) ||
+		!strings.Contains(string(data), `"enabled":false`) {
+		t.Fatalf("json off event missing runtime result: %s", data)
+	}
+}
+
+func TestActiveAccessLogJSONOnRecordsItsResult(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	path := filepath.Join(t.TempDir(), "pattyLog.jsonl")
+	PattyGraph.pattyConfig.setJSONFile(path)
+
+	match("!!! json on")
+
+	if !generateSidecarJSONL {
+		t.Fatal("json on did not enable sidecar output")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), `"source":"access_log"`) ||
+		!strings.Contains(string(data), `"command":"!!! json on"`) ||
+		!strings.Contains(string(data), `"enabled":true`) {
+		t.Fatalf("json on event missing runtime result: %s", data)
 	}
 }
 

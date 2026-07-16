@@ -985,9 +985,10 @@ JSONL Record types:
       not wall-clock process time.
 
   control_command
-      Immediate acknowledgement for a command consumed from pattyControl.log.
-      Contains command text, source, status, control_file_enabled,
-      control_file_path, and structured result metadata.
+      Immediate acknowledgement for a command consumed from pattyControl.log
+      or the actively tailed access log. Contains command text, source, status,
+      control_file_enabled, control_file_path, and structured result metadata.
+      Historical inline-looking lines found during preload are not executed.
 
   alert
       Matcher alert transition. Written when a configured matcher alert bound

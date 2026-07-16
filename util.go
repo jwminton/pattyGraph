@@ -22,7 +22,7 @@ const (
 	PattyGraphGithubUrl = "https://github.com/jwminton/pattyGraph"
 	PattyGraphName      = "PattyGraph"
 	// NOTE: PattyGraphVersion is used by compile.sh for repackaging labeling
-	PattyGraphVersion = "0.1.7"
+	PattyGraphVersion = "0.1.8-dev"
 )
 
 const (

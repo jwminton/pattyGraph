@@ -366,7 +366,7 @@ func match(line string) {
 
 	// the '!!! cmd...' inline invocation
 	if 3 == spaceIndex && InlinePreamble == line[:3] {
-		invokeInlineCommand(line)
+		invokeRuntimeInlineCommand(line, "access_log")
 		return
 	}
 
@@ -551,6 +551,19 @@ func shouldProcessControlLine(text string) bool {
 	return enableControlFile || isControlEnableLine(text)
 }
 
+// invokeRuntimeInlineCommand records commands accepted from live input through
+// the same PattyLog event shape. Startup config replay intentionally calls
+// invokeInlineCommandWithOptions directly so configuration is applied without
+// generating runtime command acknowledgements.
+func invokeRuntimeInlineCommand(text, source string) InlineCommandResult {
+	wasSidecarEnabled := generateSidecarJSONL
+	result := invokeInlineCommand(text)
+	if wasSidecarEnabled || generateSidecarJSONL {
+		recordSidecarWriteResult("inline command", PattyGraph.WriteSidecarControlCommandJSONL(text, source, result, ""))
+	}
+	return result
+}
+
 func startControlFileMonitoring() {
 	if controlFileMonitorStarted {
 		return
@@ -594,11 +607,7 @@ func startControlFileMonitoring() {
 				continue
 			}
 			mu.Lock()
-			wasSidecarEnabled := generateSidecarJSONL
-			result := invokeInlineCommand(text)
-			if wasSidecarEnabled || generateSidecarJSONL {
-				recordSidecarWriteResult("control command", PattyGraph.WriteSidecarControlCommandJSONL(text, "control_file", result, ""))
-			}
+			invokeRuntimeInlineCommand(text, "control_file")
 			mu.Unlock()
 		}
 	}()

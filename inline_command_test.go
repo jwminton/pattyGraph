@@ -682,6 +682,8 @@ func TestBuiltinHelpUsesPackagedPatternsAndCommands(t *testing.T) {
 		"!!! add Platform --regex <custom-pattern>",
 		"Regex matchers scan log lines through Go's regex engine",
 		"startup replay and ongoing runtime cost",
+		"!!! fact print <message>",
+		"including '#'",
 	} {
 		if !strings.Contains(inlineHelp, expected) {
 			t.Fatalf("--help inline missing %q", expected)
@@ -1466,6 +1468,91 @@ func TestInlineFactAcceptsKnownFactName(t *testing.T) {
 	}
 	if strings.Contains(msg, "json:on") || strings.Contains(msg, "control:on") {
 		t.Fatalf("forced factoid = %q, want filenames instead of on", msg)
+	}
+}
+
+func TestInlineFactPrintPreservesRawMessage(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts.forced = nil
+	command := `!!! fact print "Oh  boy" # this is important`
+
+	result := invokeInlineCommand(command)
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want %q: %#v", result.Status, InlineCommandStatusApplied, result.Result)
+	}
+	if result.Result["fact"] != "print" {
+		t.Fatalf("fact = %v, want print", result.Result["fact"])
+	}
+	if result.Result["text"] != `Note: "Oh  boy" # this is important` {
+		t.Fatalf("text = %q, want raw message content", result.Result["text"])
+	}
+	text, rank, name := facts.Next()
+	if name != "print" || rank != 100 {
+		t.Fatalf("queued fact = %q rank %d, want print rank 100", name, rank)
+	}
+	for _, expected := range []string{
+		internalFmt("Note:"),
+		`[white] "Oh  boy" # this is important`,
+		"[-:-:-:-]",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("ticker text = %q, want %q", text, expected)
+		}
+	}
+}
+
+func TestInlineFactPrintAcceptsTviewMarkupAndReturnsPlainText(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts.forced = nil
+
+	result := invokeInlineCommand("!!! fact PRINT [red]urgent[white] now")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want applied: %#v", result.Status, result.Result)
+	}
+	if result.Result["text"] != "Note: urgent now" {
+		t.Fatalf("text = %q, want markup-free result", result.Result["text"])
+	}
+	text, _, _ := facts.Next()
+	if !strings.Contains(text, "[red]urgent[white] now") || !strings.HasSuffix(text, "[-:-:-:-]") {
+		t.Fatalf("ticker text = %q, want supplied markup and full reset", text)
+	}
+}
+
+func TestInlineFactPrintRejectsInvalidMessages(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		error   string
+	}{
+		{name: "missing", message: "", error: "fact print requires message text"},
+		{name: "whitespace", message: "   ", error: "fact print requires message text"},
+		{name: "tags only", message: "[red]", error: "fact print requires visible message text"},
+		{name: "control", message: "hello\x1bworld", error: "fact print message cannot contain control characters"},
+		{name: "invalid utf8", message: string([]byte{'h', 0xff}), error: "fact print requires valid UTF-8 text"},
+		{name: "byte limit", message: strings.Repeat("a", inlinePrintMaxBytes+1), error: "fact print message must be 1024 bytes or fewer"},
+		{name: "visible limit", message: strings.Repeat("a", inlinePrintMaxVisible+1), error: "fact print message must be 256 visible characters or fewer"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMonitorPipelineTestGraph()
+			facts.forced = nil
+			result := invokeInlineCommand("!!! fact print " + tt.message)
+			if result.Status != InlineCommandStatusRejected {
+				t.Fatalf("status = %q, want rejected: %#v", result.Status, result.Result)
+			}
+			if result.Result["error_kind"] != "invalid_argument" || result.Result["argument"] != "message" {
+				t.Fatalf("invalid argument fields = %#v", result.Result)
+			}
+			if result.Result["error"] != tt.error {
+				t.Fatalf("error = %q, want %q", result.Result["error"], tt.error)
+			}
+			if len(facts.forced) != 0 {
+				t.Fatalf("rejected message queued %d factoids", len(facts.forced))
+			}
+		})
 	}
 }
 

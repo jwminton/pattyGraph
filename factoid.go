@@ -117,6 +117,12 @@ func AlwaysSchedule() FactoidSchedule {
 	}
 }
 
+func DirectOnlySchedule() FactoidSchedule {
+	return func(_, _ int, _ bool) bool {
+		return false
+	}
+}
+
 func CycleMod(mod, offset int, f FactoidFunc) *Factoid {
 	return Scheduled(0, CycleSchedule(mod, offset), f)
 }
@@ -141,6 +147,13 @@ func Every(n int, f FactoidFunc) *Factoid {
 
 func Always(f FactoidFunc) *Factoid {
 	return Scheduled(100, AlwaysSchedule(), f)
+}
+
+// DirectOnly factoids are addressable by name but never enter the random or
+// periodic background stream. Their high rank keeps requested values in the
+// retained factoid panel after they pass through the ticker.
+func DirectOnly(f FactoidFunc) *Factoid {
+	return Scheduled(100, DirectOnlySchedule(), f)
 }
 
 type FactoidGenerator struct {
@@ -283,6 +296,13 @@ func NewFactoidGenerator() *FactoidGenerator {
 	})
 	// Welcome messages
 	g.forced = []*Factoid{welcome, logReadIn}
+
+	g.Add(DirectOnly(func(args []string) string {
+		if len(args) == 0 || args[0] == "" {
+			return ""
+		}
+		return internalFmt("Note:") + "[white] " + args[0] + "[-:-:-:-]"
+	}), "print")
 
 	g.Add(Random(1, func(_ []string) string {
 		return fmt.Sprintf(toolFmt("Init(%s):%s/%slines"),

@@ -78,6 +78,41 @@ func TestWriteConfigEmitsControlFile(t *testing.T) {
 	}
 }
 
+func TestWriteConfigPreservesDefaultOutputEnablement(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	generateSidecarJSONL = true
+	enableControlFile = true
+
+	var buf bytes.Buffer
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig() error = %v", err)
+	}
+	out := buf.String()
+
+	for _, expected := range []string{"!!! json on\n", "!!! control on\n"} {
+		if !strings.Contains(out, expected) {
+			t.Fatalf("config did not preserve default output enablement %q:\n%s", expected, out)
+		}
+	}
+}
+
+func TestInlineFactOutputPathsUsesDefaultNamesWhenEnabled(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	facts.forced = nil
+	PattyGraph.pattyConfig.setSaveDir("/tmp/patty-splats")
+	generateSidecarJSONL = true
+	enableControlFile = true
+
+	result := invokeInlineCommand("!!! fact output.paths")
+
+	if result.Status != InlineCommandStatusApplied {
+		t.Fatalf("status = %q, want applied: %#v", result.Status, result.Result)
+	}
+	if result.Result["text"] != "Output json:pattyLog.jsonl control:pattyControl.log save:patty-splats" {
+		t.Fatalf("output paths = %q, want enabled default filenames", result.Result["text"])
+	}
+}
+
 func TestWriteConfigEmitsAlertLines(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	invokeInlineCommand("!!! alert errs above 50")

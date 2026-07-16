@@ -36,3 +36,14 @@ func TestScheduledUsesSingleConstructorModel(t *testing.T) {
 		t.Fatalf("Generate() = %q, want ok", got)
 	}
 }
+
+func TestDirectOnlyFactNeverEntersBackgroundSchedule(t *testing.T) {
+	f := DirectOnly(func(_ []string) string { return "direct" })
+
+	if f.probability != 100 {
+		t.Fatalf("probability = %d, want 100", f.probability)
+	}
+	if f.Condition(1, 0, false) || f.Condition(100, 0, true) {
+		t.Fatal("DirectOnly condition should always be false")
+	}
+}
