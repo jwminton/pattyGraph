@@ -56,18 +56,19 @@ type Monitor struct {
 	ipsView              *tview.TextView // interesting IP results
 
 	// Core matcher lanes kept by name for fast access and UI coordination.
-	matchers     []MatcherFacade
-	botsMatcher  *Matcher
-	wordsMatcher *InterestingWordMatcher
-	refsMatcher  *InterestingWordMatcher
-	ipsMatcher   *InterestingWordMatcher
-	linesMatcher *Matcher
-	bytesMatcher *Matcher
-	errsMatcher  *Matcher
+	matchers      []MatcherFacade
+	botsMatcher   *Matcher
+	wordsMatcher  *InterestingWordMatcher
+	refsMatcher   *InterestingWordMatcher
+	ipsMatcher    *InterestingWordMatcher
+	linesMatcher  *Matcher
+	bytesMatcher  *Matcher
+	errsMatcher   *Matcher
+	changeMatcher *ChangeMatcher
 
 	secondaryView      SecondaryView
 	selectedGraphValue int
-	logtime            time.Time  // updated once a cycle from log input. Used for status display only.
+	logtime            time.Time  // source-derived model clock used by interval state, display, and PattyLog
 	logtimeCache       *time.Time // part of the trigger for log time cache update once a cycle
 	//selectedGraphPosition string  // used for debugging mouse click x.y capture
 
@@ -81,7 +82,6 @@ type Monitor struct {
 	showTicker             bool
 	// Runtime metrics and alert transitions.
 	totalAgentTokens        uint64
-	unmarked                int
 	pendingAlertTransitions []AlertTransition
 }
 
@@ -103,6 +103,7 @@ const (
 	BotsMatcherName     = "Bots"
 	BrowserMatcherName  = "Browser"
 	PlatformMatcherName = "Platform"
+	ChangeMatcherName   = "change"
 )
 
 // botsIndex is the matcher ordering boundary. Rows above Bots compete for a
@@ -126,11 +127,12 @@ var totalAgentTokenCount uint64
 // Matcher-specific state must use asMatcher() and handle nil for interesting
 // streams.
 type MatcherFacade interface {
-	push()               // Pushes data to the matcher
-	match() bool         // Matches against currentLine
-	matcherName() string // Provides the matcher’s name
-	displayString() string
-	displayMatched() string // Generates a display string
+	prePush()                    // Derives completed-interval state before snapshots and reset
+	push()                       // Pushes data to the matcher
+	match() bool                 // Matches against currentLine
+	matcherName() string         // Provides the matcher’s name
+	renderSparklineRow() string  // Renders the lane's one-row history summary
+	renderDetailListing() string // Renders its matcher details or interesting-item column
 	setColor(color string)
 	minMaxHistory() (int, int)
 	getCount() int
@@ -187,6 +189,8 @@ func NewMonitor(conf *MonitorConfig) *Monitor {
 	matchers = append(matchers, bytesMatcher)
 	errsMatcher := MatcherFactory("errs")
 	matchers = append(matchers, errsMatcher)
+	changeMatcher := NewChangeMatcher()
+	matchers = append(matchers, changeMatcher)
 
 	words := WordMatcherFactory("words")
 	matchers = append(matchers, words)
@@ -203,6 +207,7 @@ func NewMonitor(conf *MonitorConfig) *Monitor {
 		linesMatcher:         linesMatcher,
 		bytesMatcher:         bytesMatcher,
 		errsMatcher:          errsMatcher,
+		changeMatcher:        changeMatcher,
 		wordsMatcher:         words,
 		refsMatcher:          refs,
 		ipsMatcher:           ips,
@@ -264,11 +269,26 @@ var lastMonitorMaxBuf = &ringBuffer{}
 var lastLinesBuf = &ringBuffer{}
 var lastBytesBuf = &ringBuffer{}
 
+// prePush gives interval-derived matchers one idempotent preparation phase
+// while every current counter is still intact. It must run before a PattyLog
+// before-push snapshot and before push resets matcher and WordStats state.
+func prePush() {
+	if PattyGraph == nil {
+		return
+	}
+	for _, matcher := range PattyGraph.matchers {
+		matcher.prePush()
+	}
+}
+
 // calls all matcher.push within the Monitor
 // signals the end of an interval (DefaultIntervalSize cycles completed). Interval based
 // counters should be reset now
 func push() {
-	PattyGraph.overallMax = -1 // -1 is a cache invalidation signal that causes recomputation of values for displayString()
+	// Direct test and internal callers remain safe even when they did not need a
+	// before-push PattyLog snapshot. ChangeMatcher preparation is idempotent.
+	prePush()
+	PattyGraph.overallMax = -1 // -1 is a cache invalidation signal that causes recomputation of values for renderSparklineRow()
 	_, avg, mmx := PattyGraph.minAvgMaxHistoryAcrossMatchers()
 	lastMonitorMaxBuf.Push(mmx)
 	_, linesMax := PattyGraph.linesMatcher.minMaxHistory()
@@ -306,7 +326,6 @@ func push() {
 	PattyGraph.logtimeCache = nil
 	PattyGraph.intervalLines = 0
 	PattyGraph.intervalsCompleted++
-	PattyGraph.unmarked = 0
 }
 
 func (m *Monitor) registerAlertTransition(t AlertTransition) {
@@ -695,25 +714,32 @@ func (m *Monitor) printToFile() (string, error) {
 	return fullPath, nil
 }
 
-func (m *Monitor) purgeAllPeakContent() {
+func (m *Monitor) purgeAllPeakContent() bool {
 	if m.selectedMatcher != nil {
 		//if m.selectedMatcher.isAddedAutobot {
 		m.selectedMatcher.purgeMatchedWords()
 		//}
-		return
+		return false
 	}
 	purgePeakWordCommand()
+	return true
 }
 func (m *Monitor) deleteSelectedMatcher() {
-	if m.selectedMatcher == nil ||
-		//m.selectedMatcher == PattyGraph.botsMatcher ||
-		m.selectedMatcher == PattyGraph.bytesMatcher ||
-		m.selectedMatcher == PattyGraph.linesMatcher ||
-		m.selectedMatcher == PattyGraph.errsMatcher {
+	if m.selectedMatcher == nil || isProtectedSystemMatcher(m.selectedMatcher) {
 		return
 	}
 	removeMatcher(m.selectedMatcher.matcherName())
 	UpdateHistoricFlags()
+}
+
+func isProtectedSystemMatcher(matcher *Matcher) bool {
+	if PattyGraph == nil || matcher == nil {
+		return false
+	}
+	return matcher == PattyGraph.bytesMatcher ||
+		matcher == PattyGraph.linesMatcher ||
+		matcher == PattyGraph.errsMatcher ||
+		(PattyGraph.changeMatcher != nil && matcher == PattyGraph.changeMatcher.asMatcher())
 }
 
 func (m *Monitor) playConfigFile(configFile string) {

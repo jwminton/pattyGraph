@@ -46,7 +46,7 @@ type Matcher struct {
 	AlertAbove          AlertBound
 	AlertBelow          AlertBound
 
-	matchedDisplayCount int // cache for how many subgroups printed for click selection later
+	detailRowCount int // detail rows emitted for later click-zone interpretation
 
 	entryDisplayLineFunc                             func(entry matchEntry) string
 	entryDisplaySort                                 func([]matchEntry)
@@ -59,10 +59,14 @@ type Matcher struct {
 
 	disableAutoAdd bool
 	isHistorical   bool // if true, use global min/avg/max for graph scale (saves having to look it up)
+	// Derived system rows can remain selectable without reserving a source-line
+	// area they can never populate. The negative flag preserves source display
+	// for ordinary and zero-value matchers.
+	suppressSelectedSourceLine bool
 	// Cache fields
 	historySparklineCache string
-	displayMatchedCache   string
-	matchedBuilder        strings.Builder
+	detailListingCache    string
+	detailListingBuilder  strings.Builder
 }
 
 func NewPredicateMatcher(name string) *Matcher {
@@ -86,9 +90,15 @@ func (m *Matcher) asMatcher() *Matcher {
 	return m
 }
 
+func (m *Matcher) displaysSelectedSourceLine() bool {
+	return m != nil && !m.suppressSelectedSourceLine
+}
+
+func (m *Matcher) prePush() {}
+
 // markAsAddedMatcher identifies user-added and promoted simple matchers for
 // display and remembered-IP tagging behavior. Built-in system rows such as
-// Bots, lines, bytes, and errs leave this false.
+// Bots, lines, bytes, errs, and change leave this false.
 func (m *Matcher) markAsAddedMatcher() {
 	m.isAddedAutobot = true
 }
@@ -180,7 +190,7 @@ func (m *Matcher) migrateTopBot(threshold float64) {
 	m.intervalCount -= topCount
 	botsMigrated++
 	delete(m.matchCountsMap, topBot)
-	m.displayMatchedCache = ""
+	m.detailListingCache = ""
 }
 
 /************************************************************************
@@ -298,7 +308,7 @@ func (m *Matcher) matcherName() string {
 }
 func (m *Matcher) setColor(color string) {
 	// color and counts cause the display to need to be regenerated
-	m.displayMatchedCache = ""
+	m.detailListingCache = ""
 	m.color = color
 }
 
@@ -309,7 +319,15 @@ func (m *Matcher) asInlineCommand() string {
 
 // push appends the current intervalCount to history, resets intervalCount, and maintains a max history length of DefaultHistoryDepth.
 func (m *Matcher) push() {
-	m.evaluateAlertBounds()
+	m.pushInterval(true)
+}
+
+// pushInterval contains the common history/reset path. Derived interval
+// matchers may suppress alert evaluation while establishing a baseline.
+func (m *Matcher) pushInterval(evaluateAlerts bool) {
+	if evaluateAlerts {
+		m.evaluateAlertBounds()
+	}
 
 	// Append the current intervalCount to history
 	m.history = append(m.history, m.intervalCount)
@@ -324,7 +342,7 @@ func (m *Matcher) push() {
 		// Remove the oldest entry if we exceed DefaultHistoryDepth elements
 		m.history = m.history[1:]
 	}
-	m.displayMatchedCache = ""
+	m.detailListingCache = ""
 	m.historySparklineCache = ""
 	m.postEndInterval()
 }
@@ -359,7 +377,7 @@ func (m *Matcher) match() bool {
 				m.intervalMatchLine = currentLine.logLine
 			}
 			m.lastMatchLine = currentLine.logLine
-			m.displayMatchedCache = ""
+			m.detailListingCache = ""
 			// This is m.standardMatchedAction() unless overridden post-creation time
 			m.onMatchBehavior(prefetch)
 			return true
@@ -517,9 +535,10 @@ func (m *Matcher) generateSparkline(bottom int, top int) string {
 	return sparklineFromArray(scaledBottom, maxVal, history)
 }
 
-// displayString generates the matcher row, including current count, sparkline,
+// renderSparklineRow generates the matcher row, including current count, sparkline,
 // selected detail mode, and optional grouped match breakdowns.
-func (m *Matcher) displayString() string {
+// Formerly called displayString.
+func (m *Matcher) renderSparklineRow() string {
 	//globalBottom, globalTop := PattyGraph.overallMin, PattyGraph.overallMax
 	// Convert the current intervalCount to a string
 	//currentCount := strconv.Itoa(matcher.intervalCount)
@@ -608,18 +627,19 @@ func (m *Matcher) expandGlyph() string {
 // panel. The expansion glyph reflects the resulting zero, one, or two levels.
 func (m *Matcher) cycleDisplayMatchMode() {
 	m.displayMatchMode = (m.displayMatchMode + 1) % 3
-	m.displayMatchedCache = ""
+	m.detailListingCache = ""
 }
 
-// displayMatched returns a formatted string of all unique matched entries and their counts,
-// sorted by intervalCount in descending order and alphabetically by match for ties.
-func (m *Matcher) displayMatched() string {
-	defer m.matchedBuilder.Reset()
+// renderDetailListing builds the lower-left matcher listing, including its
+// title and any expanded groups or matched entries.
+// Formerly called displayMatched.
+func (m *Matcher) renderDetailListing() string {
+	defer m.detailListingBuilder.Reset()
 
-	if m.displayMatchedCache != "" {
-		return m.displayMatchedCache
+	if m.detailListingCache != "" {
+		return m.detailListingCache
 	}
-	m.matchedDisplayCount = 0
+	m.detailRowCount = 0
 	// Collect entries into a slice for sorting
 	var entries []matchEntry
 	entrySum := 0
@@ -634,7 +654,7 @@ func (m *Matcher) displayMatched() string {
 	m.entryDisplaySort(entries)
 
 	// Build the result string
-	result := m.matchedBuilder
+	result := m.detailListingBuilder
 
 	// This used to be for coexistence with tview color directives
 	if m.isAddedAutobot || !m.useRegexMatchKeys {
@@ -685,7 +705,7 @@ func (m *Matcher) displayMatched() string {
 			if groups[group.prefix] >= matcherGroupingFactor { // Only print groups with large enough intervalCount
 				groupString := fmt.Sprintf("%s*.*(%d)", group.prefix, groups[group.prefix])
 				result.WriteString(fmt.Sprintf(m.displayColor()+" %-16s %5s  [-:-]\n", groupString, formatCounts(group.count)))
-				m.matchedDisplayCount++
+				m.detailRowCount++
 			}
 		}
 	} else {
@@ -707,14 +727,14 @@ func (m *Matcher) displayMatched() string {
 			for _, entry := range entries {
 				entryString := m.entryDisplayLineFunc(entry)
 				if entryString != "" {
-					m.matchedDisplayCount++ // for proper list display later!
+					m.detailRowCount++ // for proper list display later!
 					result.WriteString(entryString)
 				}
 			}
 		}
 	}
-	m.displayMatchedCache = result.String()
-	return m.displayMatchedCache
+	m.detailListingCache = result.String()
+	return m.detailListingCache
 }
 
 func (m *Matcher) entryDisplayLine(entry matchEntry) string {
@@ -872,7 +892,7 @@ func (m *Matcher) purgeMatchedWords() {
 	m.matchCountsMap = make(map[string]int, 5)
 	m.ipGroupsMap = make(map[string]int, 5)
 	m.ipGroupsCountsMap = make(map[string]int, 5)
-	m.displayMatchedCache = ""
+	m.detailListingCache = ""
 	m.bytesServed = 0
 }
 

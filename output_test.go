@@ -96,6 +96,23 @@ func TestWriteConfigPreservesDefaultOutputEnablement(t *testing.T) {
 	}
 }
 
+func TestWriteConfigPreservesJSONSourcesIndependently(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	includeSidecarSourceExamples = true
+
+	var buf bytes.Buffer
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig() error = %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "!!! json-sources on\n") {
+		t.Fatalf("config did not preserve json-sources setting:\n%s", out)
+	}
+	if strings.Contains(out, "!!! json on\n") || strings.Contains(out, "!!! json-file") {
+		t.Fatalf("json-sources setting enabled JSONL in config:\n%s", out)
+	}
+}
+
 func TestInlineFactOutputPathsUsesDefaultNamesWhenEnabled(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	facts.forced = nil

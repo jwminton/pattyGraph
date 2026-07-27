@@ -33,6 +33,9 @@ func TestDefaultSidecarOptionsStayCompact(t *testing.T) {
 	if opts.IncludeSourceLines {
 		t.Fatal("IncludeSourceLines = true, want false")
 	}
+	if opts.IncludeSourceExamples {
+		t.Fatal("IncludeSourceExamples = true, want false")
+	}
 	if !opts.IncludeMatcherKeys {
 		t.Fatal("IncludeMatcherKeys = false, want true")
 	}
@@ -64,6 +67,105 @@ func TestSidecarSnapshotUsesMonitorLogTime(t *testing.T) {
 	}
 }
 
+func TestSidecarEventsUseMonitorLogTime(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	want := time.Date(2042, time.November, 8, 3, 17, 41, 0, time.FixedZone("skewed", 9*60*60))
+	PattyGraph.logtime = want
+
+	interval := PattyGraph.SidecarSnapshot(DefaultSidecarOptions())
+	session := PattyGraph.SidecarSessionStart()
+	command := PattyGraph.SidecarControlCommand("!!! fact print deployment marker", "control_file", InlineCommandResult{})
+	alert := PattyGraph.SidecarAlert(AlertTransition{})
+
+	assertSidecarClock := func(name string, timestamp time.Time, logTime time.Time) {
+		t.Helper()
+		if !timestamp.Equal(want) || !logTime.Equal(want) {
+			t.Fatalf("%s clocks = timestamp %s, log_time %s; want %s", name, timestamp, logTime, want)
+		}
+	}
+	assertSidecarClock("interval", interval.Timestamp, interval.LogTime)
+	assertSidecarClock("session_start", session.Timestamp, session.LogTime)
+	assertSidecarClock("control_command", command.Timestamp, command.LogTime)
+	assertSidecarClock("alert", alert.Timestamp, alert.LogTime)
+}
+
+func TestSidecarEventsUseEpochBeforeLogTime(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.logtime = time.Time{}
+	want := time.Unix(0, 0).UTC()
+	interval := PattyGraph.SidecarSnapshot(DefaultSidecarOptions())
+	session := PattyGraph.SidecarSessionStart()
+	command := PattyGraph.SidecarControlCommand("!!! facts", "control_file", InlineCommandResult{})
+	alert := PattyGraph.SidecarAlert(AlertTransition{})
+
+	events := []struct {
+		name      string
+		timestamp time.Time
+		logTime   time.Time
+	}{
+		{"interval", interval.Timestamp, interval.LogTime},
+		{"session_start", session.Timestamp, session.LogTime},
+		{"control_command", command.Timestamp, command.LogTime},
+		{"alert", alert.Timestamp, alert.LogTime},
+	}
+	for _, event := range events {
+		if !event.timestamp.Equal(want) || !event.logTime.Equal(want) {
+			t.Fatalf("%s clocks = timestamp %s, log_time %s; want epoch", event.name, event.timestamp, event.logTime)
+		}
+	}
+}
+
+func TestSidecarEventsAlwaysSerializeLogTime(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.logtime = time.Time{}
+	events := []struct {
+		name  string
+		event interface{}
+	}{
+		{"interval", PattyGraph.SidecarSnapshot(DefaultSidecarOptions())},
+		{"session_start", PattyGraph.SidecarSessionStart()},
+		{"control_command", PattyGraph.SidecarControlCommand("!!! facts", "control_file", InlineCommandResult{})},
+		{"alert", PattyGraph.SidecarAlert(AlertTransition{})},
+	}
+	for _, event := range events {
+		data, err := json.Marshal(event.event)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", event.name, err)
+		}
+		for _, field := range []string{`"timestamp":"1970-01-01T00:00:00Z"`, `"log_time":"1970-01-01T00:00:00Z"`} {
+			if !strings.Contains(string(data), field) {
+				t.Fatalf("%s missing %s: %s", event.name, field, data)
+			}
+		}
+	}
+}
+
+func TestSidecarLogTimePreservesSourceClock(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	for _, want := range []time.Time{
+		time.Date(1965, time.January, 2, 3, 4, 5, 0, time.UTC),
+		time.Date(2126, time.December, 30, 23, 58, 57, 0, time.FixedZone("future", -11*60*60)),
+	} {
+		PattyGraph.logtime = want
+		if got := sidecarLogTime(PattyGraph); !got.Equal(want) {
+			t.Fatalf("sidecarLogTime() = %s, want source time %s", got, want)
+		}
+	}
+}
+
+func TestSidecarSnapshotUsesLinesMatcherForUnmarkedCount(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	PattyGraph.intervalLines = 14
+	PattyGraph.linesMatcher.intervalCount = 12
+	PattyGraph.linesMatcher.matchCountsMap["marked"] = 5
+
+	snap := PattyGraph.SidecarSnapshot(DefaultSidecarOptions())
+
+	if snap.Unmarked != 7 {
+		t.Fatalf("Unmarked = %d, want 7", snap.Unmarked)
+	}
+}
+
 func TestSidecarWordEntriesAreCappedSortedAndRanked(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	words := WordMatcherFactory("words")
@@ -77,7 +179,7 @@ func TestSidecarWordEntriesAreCappedSortedAndRanked(t *testing.T) {
 		words.wordFrequency[fmt.Sprintf("word%02d", i)] = stats
 	}
 
-	entries := sidecarWordEntries(words, limit, opts)
+	entries := sidecarWordEntries(words, limit, opts, nil)
 
 	if len(entries) != limit {
 		t.Fatalf("len(entries) = %d, want %d", len(entries), limit)
@@ -99,6 +201,111 @@ func TestSidecarWordEntriesAreCappedSortedAndRanked(t *testing.T) {
 	}
 }
 
+func TestSidecarInterestingSourceExamplesAreDeduplicated(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	words := WordMatcherFactory("words")
+	line := `192.0.2.1 - - [22/Jan/2019:05:24:59 +0330] "GET /catalog HTTP/1.1" 200 3710 "-" "Agent/1.0" "-"`
+	for _, key := range []string{"catalog", "product"} {
+		stats := newWordStats()
+		stats.count = 10
+		stats.lastLogLine = line
+		words.wordFrequency[key] = stats
+		words.peakWords = append(words.peakWords, key)
+		words.peakWordsSet[key] = true
+	}
+
+	sources := newSidecarSourceCatalog()
+	opts := DefaultSidecarOptions()
+	opts.IncludeSourceExamples = true
+	entries := sidecarWordEntries(words, defaultSidecarTopLimit, opts, sources)
+	peaks := sidecarPeakWordEntries(words, defaultSidecarTopLimit, opts, sources)
+
+	if len(entries) != 2 || len(peaks) != 2 {
+		t.Fatalf("entry counts = %d/%d, want 2/2", len(entries), len(peaks))
+	}
+	for _, entry := range append(entries, peaks...) {
+		if entry.SourceLineRef != 1 {
+			t.Fatalf("source ref for %q = %d, want 1", entry.Key, entry.SourceLineRef)
+		}
+	}
+	if got := sources.lines(); len(got) != 1 || got[0] != line {
+		t.Fatalf("source catalog = %#v, want one retained line", got)
+	}
+}
+
+func TestSidecarSnapshotPublishesInterestingSourceCatalog(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	line := `192.0.2.1 - - [22/Jan/2019:05:24:59 +0330] "GET /catalog HTTP/1.1" 200 3710 "-" "Agent/1.0" "-"`
+	stats := newWordStats()
+	stats.count = 10
+	stats.lastLogLine = line
+	PattyGraph.wordsMatcher.wordFrequency["catalog"] = stats
+
+	opts := DefaultSidecarOptions()
+	opts.IncludeSourceExamples = true
+	snapshot := PattyGraph.SidecarSnapshot(opts)
+	if !snapshot.SourceExamplesEnabled {
+		t.Fatal("source_examples_enabled = false, want true")
+	}
+	if len(snapshot.SourceLines) != 1 || snapshot.SourceLines[0] != line {
+		t.Fatalf("source lines = %#v, want catalog line", snapshot.SourceLines)
+	}
+	if len(snapshot.Interesting) == 0 || len(snapshot.Interesting[0].Top) == 0 {
+		t.Fatalf("interesting snapshot missing word entry: %#v", snapshot.Interesting)
+	}
+	if ref := snapshot.Interesting[0].Top[0].SourceLineRef; ref != 1 {
+		t.Fatalf("catalog source ref = %d, want 1", ref)
+	}
+}
+
+func TestSidecarSnapshotOmitsInterestingSourcesWhenDisabled(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	stats := newWordStats()
+	stats.count = 10
+	stats.lastLogLine = `192.0.2.1 - retained line`
+	PattyGraph.wordsMatcher.wordFrequency["catalog"] = stats
+
+	snapshot := PattyGraph.SidecarSnapshot(DefaultSidecarOptions())
+	if snapshot.SourceExamplesEnabled {
+		t.Fatal("source_examples_enabled = true, want false")
+	}
+	if len(snapshot.SourceLines) != 0 {
+		t.Fatalf("source lines = %#v, want none", snapshot.SourceLines)
+	}
+	if ref := snapshot.Interesting[0].Top[0].SourceLineRef; ref != 0 {
+		t.Fatalf("catalog source ref = %d, want 0", ref)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal compact snapshot: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"source_examples_enabled":false`) {
+		t.Fatalf("compact snapshot omitted source capability: %s", encoded)
+	}
+	if strings.Contains(string(encoded), `"source_lines"`) || strings.Contains(string(encoded), `"source_line_ref"`) {
+		t.Fatalf("compact snapshot encoded source catalog data: %s", encoded)
+	}
+}
+
+func TestSidecarProductionSnapshotsUseRuntimeSourcePreference(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	stats := newWordStats()
+	stats.count = 10
+	stats.lastLogLine = `192.0.2.1 - retained line`
+	PattyGraph.wordsMatcher.wordFrequency["catalog"] = stats
+
+	compact := PattyGraph.SidecarSnapshotBeforePush()
+	includeSidecarSourceExamples = true
+	enriched := PattyGraph.SidecarSnapshotBeforePush()
+
+	if compact.SourceExamplesEnabled || len(compact.SourceLines) != 0 {
+		t.Fatalf("compact snapshot unexpectedly included sources: %#v", compact.SourceLines)
+	}
+	if !enriched.SourceExamplesEnabled || len(enriched.SourceLines) != 1 {
+		t.Fatalf("enriched snapshot source state = %t/%#v, want true/one line", enriched.SourceExamplesEnabled, enriched.SourceLines)
+	}
+}
+
 func TestSidecarIPGroupMetricsAreIndependentOfTabView(t *testing.T) {
 	const epsilon = 1e-12
 	var baseline SidecarIPGroupEntry
@@ -115,7 +322,7 @@ func TestSidecarIPGroupMetricsAreIndependentOfTabView(t *testing.T) {
 			}
 			wantBurstiness := burstinessSum / float64(IpGroupActiveThreshold)
 
-			entries := sidecarIPGroupEntries(matcher, defaultSidecarTopLimit, DefaultSidecarOptions())
+			entries := sidecarIPGroupEntries(matcher, defaultSidecarTopLimit, DefaultSidecarOptions(), nil)
 			if len(entries) != 1 {
 				t.Fatalf("IP group entries = %d, want 1: %#v", len(entries), entries)
 			}
@@ -290,6 +497,8 @@ func TestSidecarHelpUsesHumanFriendlyDefaultFilename(t *testing.T) {
 	help := sidecarHelpText()
 	for _, expected := range []string{
 		"<save-dir>/pattyLog.jsonl",
+		"--json-sources",
+		"!!! json-sources on",
 		"created/truncated at session start",
 		"Use separate --json-file values",
 		"actively tailed access log",
@@ -614,5 +823,38 @@ func TestBackgroundFactoidsDoNotConsumeStartupWelcome(t *testing.T) {
 	welcome, _, _ := g.Next()
 	if !strings.Contains(welcome, PattyGraphVersion) && !strings.Contains(welcome, "▁▂▃▄▅▆▇█") {
 		t.Fatalf("first normal factoid = %q, want welcome", welcome)
+	}
+}
+
+func TestSidecarFactoidsRetainOnlyPanelRankedObservations(t *testing.T) {
+	oldFacts := facts
+	oldFactoidByName := factoidByName
+	oldDoRandom := doRandomFact
+	t.Cleanup(func() {
+		facts = oldFacts
+		factoidByName = oldFactoidByName
+		doRandomFact = oldDoRandom
+	})
+
+	doRandomFact = true
+	factoidByName = map[string]*Factoid{}
+	facts = &FactoidGenerator{}
+	facts.Add(Scheduled(1, AlwaysSchedule(), func(_ []string) string {
+		return tipText("ephemeral")
+	}), "tip", "test")
+
+	if got := sidecarFactoids(1); len(got) != 0 {
+		t.Fatalf("low-rank sidecar factoids = %#v, want none", got)
+	}
+
+	factoidByName = map[string]*Factoid{}
+	facts = &FactoidGenerator{}
+	facts.Add(Scheduled(minimumFactoidRetentionRank, AlwaysSchedule(), func(_ []string) string {
+		return toolFmt("Retained")
+	}), "test", "retained")
+
+	got := sidecarFactoids(1)
+	if len(got) != 1 || got[0].Name != "test.retained" || got[0].Text != "Retained" {
+		t.Fatalf("retained sidecar factoids = %#v", got)
 	}
 }

@@ -44,6 +44,7 @@ var flags = []flagInfo{
 	{"color-index", "l", 0, "Advance the color assignment index for a different look", "int"},
 	{"json", "j", false, "Write PattyLog JSONL interval data to <save-dir>/pattyLog.jsonl", "bool"},
 	{"json-file", "", "", "Write PattyLog JSONL to a specific file under <save-dir>; implies --json", "string"},
+	{"json-sources", "", false, "Include representative source lines in PattyLog interval data", "bool"},
 	{"control", "C", false, "Read inline commands from pattyControl.log in save-dir/current dir", "bool"},
 	{"control-file", "", "", "Read inline commands from a specific file under <save-dir>; implies --control", "string"},
 	{"zero", "0", false, "Force cycle count = 0 at start", "bool"},
@@ -193,7 +194,7 @@ func parseArgs() *MonitorConfig {
 		categories := map[string][]string{
 			"General Settings": {"push", "scale", "grace", "flux"},
 			//"Customization":    {"title", "color-index", "read", "expert", "zero"},
-			"Configuration": {"config", "save-dir", "json", "json-file", "control", "control-file"},
+			"Configuration": {"config", "save-dir", "json", "json-file", "json-sources", "control", "control-file"},
 			"Customization": {"title", "color-index", "read", "zero"},
 			"Help":          {"help"},
 		}
@@ -265,6 +266,7 @@ func parseArgs() *MonitorConfig {
 	forceZeroStart = *boolMap["zero"]
 	//expertMode = *boolMap["expert"]
 	generateSidecarJSONL = *boolMap["json"] || mConf.jsonFile != ""
+	includeSidecarSourceExamples = *boolMap["json-sources"]
 	enableControlFile = *boolMap["control"] || mConf.controlFile != ""
 	colorIndex = *intMap["color-index"] // from config
 	machineDisplayName = *stringMap["title"]
@@ -485,6 +487,12 @@ Alert Notes:
   Alerts attach simple bounds to existing matchers. They evaluate once per
   interval when matcher counts are pushed.
 
+  The built-in change matcher compares adjacent completed intervals and reports
+  directionless traffic-shape movement from 0 to 100. Expanding change shows
+  bounded component bars behind the value; fewer bars mean less movement. Its
+  first interval establishes a baseline and does not contribute to alert
+  streaks.
+
   above N means N or more hits in an interval.
   below N means fewer than N hits in an interval.
 
@@ -502,6 +510,9 @@ Alert Notes:
 Examples:
   !!! alert errs above 50
       Alert when errs reaches 50 or more for flux-depth consecutive intervals.
+  !!! alert change above 40
+      Alert when traffic-shape movement reaches 40 or more for flux-depth
+      consecutive intervals.
   !!! alert Googlebot below 1
       Alert when Googlebot has zero hits for flux-depth consecutive intervals.
   !!! alert Googlebot above 500
@@ -527,6 +538,8 @@ Configuration Settings:
       Set the directory for config and splat output (e.g. ~/splats).
   !!! json-file <path>
       Write PattyLog JSONL to a specific file relative to <save-dir>. Implies json on.
+  !!! json-sources <on|off>
+      Include representative source lines in subsequent PattyLog intervals. Does not enable JSONL.
   !!! control <on|off>
       Enable or disable pattyControl.log command input. Use -C/--control to start with it on.
   !!! control-file <path>

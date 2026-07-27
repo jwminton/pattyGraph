@@ -998,7 +998,7 @@ func getWrappedFactoid() string {
 
 	// Factoid probability also acts as the panel inclusion rank. Low-frequency
 	// tips can appear in the ticker without filling the persistent factoid list.
-	if ranking >= 5 {
+	if retainFactoidRank(ranking) {
 		// Prepend new fact to the top of the list
 		//newFacts := splitFactoidForWidth(newFact, botsDisplayWidth)
 		newFacts := []string{newFact}

@@ -38,47 +38,51 @@ var sidecarSessionID = newSidecarSessionID()
 // The caller should take PattyGraph's mutex before calling snapshot methods if
 // ingestion or push can run concurrently.
 type SidecarOptions struct {
-	Phase              string
-	TopLimit           int
-	FactoidLimit       int
-	IncludeHistories   bool
-	IncludeSourceLines bool
-	IncludeMatcherKeys bool
+	Phase                 string
+	TopLimit              int
+	FactoidLimit          int
+	IncludeHistories      bool
+	IncludeSourceLines    bool
+	IncludeSourceExamples bool
+	IncludeMatcherKeys    bool
 }
 
 func DefaultSidecarOptions() SidecarOptions {
 	return SidecarOptions{
-		Phase:              SidecarPhaseBeforePush,
-		TopLimit:           defaultSidecarTopLimit,
-		FactoidLimit:       8,
-		IncludeHistories:   false,
-		IncludeSourceLines: false,
-		IncludeMatcherKeys: true,
+		Phase:                 SidecarPhaseBeforePush,
+		TopLimit:              defaultSidecarTopLimit,
+		FactoidLimit:          8,
+		IncludeHistories:      false,
+		IncludeSourceLines:    false,
+		IncludeSourceExamples: false,
+		IncludeMatcherKeys:    true,
 	}
 }
 
 type SidecarInterval struct {
-	SchemaVersion int                    `json:"schema_version"`
-	EventType     string                 `json:"event_type"`
-	SessionID     string                 `json:"session_id"`
-	Timestamp     time.Time              `json:"timestamp"`
-	Phase         string                 `json:"phase"`
-	FilePath      string                 `json:"file_path"`
-	Machine       string                 `json:"machine,omitempty"`
-	CurrentCycle  int                    `json:"current_cycle"`
-	LogicalCycles int                    `json:"logical_cycles"`
-	Interval      int                    `json:"interval"`
-	IntervalLines int                    `json:"interval_lines"`
-	TotalLines    uint64                 `json:"total_lines"`
-	TotalBytes    uint64                 `json:"total_bytes"`
-	Unmarked      int                    `json:"unmarked"`
-	LogTime       time.Time              `json:"log_time,omitempty"`
-	Summary       SidecarSummary         `json:"summary"`
-	Runtime       SidecarRuntime         `json:"runtime"`
-	Matchers      []SidecarMatcher       `json:"matchers"`
-	Interesting   []SidecarInteresting   `json:"interesting"`
-	Factoids      []SidecarFactoid       `json:"factoids,omitempty"`
-	Selected      SidecarSelectedContext `json:"selected,omitempty"`
+	SchemaVersion         int                    `json:"schema_version"`
+	EventType             string                 `json:"event_type"`
+	SessionID             string                 `json:"session_id"`
+	Timestamp             time.Time              `json:"timestamp"`
+	Phase                 string                 `json:"phase"`
+	FilePath              string                 `json:"file_path"`
+	Machine               string                 `json:"machine,omitempty"`
+	CurrentCycle          int                    `json:"current_cycle"`
+	LogicalCycles         int                    `json:"logical_cycles"`
+	Interval              int                    `json:"interval"`
+	IntervalLines         int                    `json:"interval_lines"`
+	TotalLines            uint64                 `json:"total_lines"`
+	TotalBytes            uint64                 `json:"total_bytes"`
+	Unmarked              int                    `json:"unmarked"`
+	LogTime               time.Time              `json:"log_time"`
+	Summary               SidecarSummary         `json:"summary"`
+	Runtime               SidecarRuntime         `json:"runtime"`
+	Matchers              []SidecarMatcher       `json:"matchers"`
+	Interesting           []SidecarInteresting   `json:"interesting"`
+	SourceExamplesEnabled bool                   `json:"source_examples_enabled"`
+	SourceLines           []string               `json:"source_lines,omitempty"`
+	Factoids              []SidecarFactoid       `json:"factoids,omitempty"`
+	Selected              SidecarSelectedContext `json:"selected,omitempty"`
 }
 
 type SidecarSessionStart struct {
@@ -86,6 +90,7 @@ type SidecarSessionStart struct {
 	EventType             string    `json:"event_type"`
 	SessionID             string    `json:"session_id"`
 	Timestamp             time.Time `json:"timestamp"`
+	LogTime               time.Time `json:"log_time"`
 	FilePath              string    `json:"file_path"`
 	Machine               string    `json:"machine,omitempty"`
 	ProcessID             int       `json:"process_id"`
@@ -103,6 +108,7 @@ type SidecarControlCommand struct {
 	EventType          string                 `json:"event_type"`
 	SessionID          string                 `json:"session_id"`
 	Timestamp          time.Time              `json:"timestamp"`
+	LogTime            time.Time              `json:"log_time"`
 	Source             string                 `json:"source"`
 	Command            string                 `json:"command"`
 	CommandName        string                 `json:"command_name,omitempty"`
@@ -117,6 +123,7 @@ type SidecarAlert struct {
 	EventType     string    `json:"event_type"`
 	SessionID     string    `json:"session_id"`
 	Timestamp     time.Time `json:"timestamp"`
+	LogTime       time.Time `json:"log_time"`
 	Status        string    `json:"status"`
 	Matcher       string    `json:"matcher"`
 	Direction     string    `json:"direction"`
@@ -219,6 +226,8 @@ type SidecarWordEntry struct {
 	Source            *SidecarLineSource `json:"source,omitempty"`
 	FirstIntervalLine string             `json:"first_interval_line,omitempty"`
 	LastLine          string             `json:"last_line,omitempty"`
+	SourceLineRef     int                `json:"source_line_ref,omitempty"`
+	exampleLine       string
 }
 
 type SidecarIPGroupEntry struct {
@@ -239,6 +248,8 @@ type SidecarIPGroupEntry struct {
 	FirstLine         string  `json:"first_line,omitempty"`
 	FirstIntervalLine string  `json:"first_interval_line,omitempty"`
 	LastLine          string  `json:"last_line,omitempty"`
+	SourceLineRef     int     `json:"source_line_ref,omitempty"`
+	exampleLine       string
 }
 
 type SidecarFactoid struct {
@@ -278,24 +289,32 @@ type SidecarLineSource struct {
 func (m *Monitor) SidecarSnapshotBeforePush() SidecarInterval {
 	opts := DefaultSidecarOptions()
 	opts.Phase = SidecarPhaseBeforePush
+	opts.IncludeSourceExamples = includeSidecarSourceExamples
 	return m.SidecarSnapshot(opts)
 }
 
 func (m *Monitor) SidecarSnapshotAfterPush() SidecarInterval {
 	opts := DefaultSidecarOptions()
 	opts.Phase = SidecarPhaseAfterPush
+	opts.IncludeSourceExamples = includeSidecarSourceExamples
 	return m.SidecarSnapshot(opts)
 }
 
 func (m *Monitor) SidecarSnapshot(opts SidecarOptions) SidecarInterval {
 	opts = normalizeSidecarOptions(opts)
 	minHistory, avgMax, maxHistory := m.minAvgMaxHistoryAcrossMatchers()
+	eventTime := sidecarLogTime(m)
+	var sourceCatalog *sidecarSourceCatalog
+	if opts.IncludeSourceExamples {
+		sourceCatalog = newSidecarSourceCatalog()
+	}
+	interesting := sidecarInterestingSnapshots(m, opts, sourceCatalog)
 
 	return SidecarInterval{
 		SchemaVersion: SidecarSchemaVersion,
 		EventType:     SidecarEventInterval,
 		SessionID:     sidecarSessionID,
-		Timestamp:     sidecarEventTime(m),
+		Timestamp:     eventTime,
 		Phase:         opts.Phase,
 		FilePath:      m.filePath,
 		Machine:       machineDisplayName,
@@ -305,8 +324,8 @@ func (m *Monitor) SidecarSnapshot(opts SidecarOptions) SidecarInterval {
 		IntervalLines: m.intervalLines,
 		TotalLines:    m.totalLines,
 		TotalBytes:    m.totalBytes,
-		Unmarked:      m.unmarked,
-		LogTime:       m.logtime,
+		Unmarked:      sidecarUnmarkedLines(m),
+		LogTime:       eventTime,
 		Summary: SidecarSummary{
 			OverallMin:       minHistory,
 			OverallAvgMax:    avgMax,
@@ -333,19 +352,34 @@ func (m *Monitor) SidecarSnapshot(opts SidecarOptions) SidecarInterval {
 			ShowTicker:            m.showTicker,
 			CurrentLine:           sidecarLineSource(currentLine, opts.IncludeSourceLines),
 		},
-		Matchers:    sidecarMatcherSnapshots(m, opts),
-		Interesting: sidecarInterestingSnapshots(m, opts),
-		Factoids:    sidecarFactoids(opts.FactoidLimit),
-		Selected:    sidecarSelectedContext(m),
+		Matchers:              sidecarMatcherSnapshots(m, opts),
+		Interesting:           interesting,
+		SourceExamplesEnabled: opts.IncludeSourceExamples,
+		SourceLines:           sourceCatalog.lines(),
+		Factoids:              sidecarFactoids(opts.FactoidLimit),
+		Selected:              sidecarSelectedContext(m),
 	}
 }
 
+func sidecarUnmarkedLines(m *Monitor) int {
+	if m == nil || m.linesMatcher == nil {
+		return 0
+	}
+	unmarked := m.linesMatcher.intervalCount - m.linesMatcher.matchCountsMap["marked"]
+	if unmarked < 0 {
+		return 0
+	}
+	return unmarked
+}
+
 func (m *Monitor) SidecarSessionStart() SidecarSessionStart {
+	eventTime := sidecarLogTime(m)
 	event := SidecarSessionStart{
 		SchemaVersion:         SidecarSchemaVersion,
 		EventType:             SidecarEventSessionStart,
 		SessionID:             sidecarSessionID,
-		Timestamp:             time.Now(),
+		Timestamp:             eventTime,
+		LogTime:               eventTime,
 		FilePath:              m.filePath,
 		Machine:               machineDisplayName,
 		ProcessID:             os.Getpid(),
@@ -391,11 +425,13 @@ func truncateSidecarJSONL(path string) error {
 }
 
 func (m *Monitor) SidecarControlCommand(command string, source string, result InlineCommandResult) SidecarControlCommand {
+	eventTime := sidecarLogTime(m)
 	return SidecarControlCommand{
 		SchemaVersion:      SidecarSchemaVersion,
 		EventType:          SidecarEventControlCommand,
 		SessionID:          sidecarSessionID,
-		Timestamp:          time.Now(),
+		Timestamp:          eventTime,
+		LogTime:            eventTime,
 		Source:             source,
 		Command:            command,
 		CommandName:        result.CommandName,
@@ -411,11 +447,13 @@ func (m *Monitor) WriteSidecarControlCommandJSONL(command string, source string,
 }
 
 func (m *Monitor) SidecarAlert(transition AlertTransition) SidecarAlert {
+	eventTime := sidecarLogTime(m)
 	return SidecarAlert{
 		SchemaVersion: SidecarSchemaVersion,
 		EventType:     SidecarEventAlert,
 		SessionID:     sidecarSessionID,
-		Timestamp:     sidecarEventTime(m),
+		Timestamp:     eventTime,
+		LogTime:       eventTime,
 		Status:        transition.Status,
 		Matcher:       transition.MatcherName,
 		Direction:     transition.Direction,
@@ -492,7 +530,11 @@ func sidecarMatcherSnapshots(m *Monitor, opts SidecarOptions) []SidecarMatcher {
 		if matcher == nil {
 			continue
 		}
-		out = append(out, sidecarMatcherSnapshot(matcher, opts))
+		snapshot := sidecarMatcherSnapshot(matcher, opts)
+		if change, ok := mf.(*ChangeMatcher); ok && opts.IncludeMatcherKeys {
+			snapshot.TopKeys = change.sidecarComponentEntries()
+		}
+		out = append(out, snapshot)
 	}
 	return out
 }
@@ -526,22 +568,22 @@ func sidecarMatcherSnapshot(m *Matcher, opts SidecarOptions) SidecarMatcher {
 	return s
 }
 
-func sidecarInterestingSnapshots(m *Monitor, opts SidecarOptions) []SidecarInteresting {
+func sidecarInterestingSnapshots(m *Monitor, opts SidecarOptions, sources *sidecarSourceCatalog) []SidecarInteresting {
 	return []SidecarInteresting{
-		sidecarInterestingSnapshot(m.wordsMatcher, opts),
-		sidecarInterestingSnapshot(m.refsMatcher, opts),
-		sidecarInterestingSnapshot(m.ipsMatcher, opts),
+		sidecarInterestingSnapshot(m.wordsMatcher, opts, sources),
+		sidecarInterestingSnapshot(m.refsMatcher, opts, sources),
+		sidecarInterestingSnapshot(m.ipsMatcher, opts, sources),
 	}
 }
 
-func sidecarInterestingSnapshot(m *InterestingWordMatcher, opts SidecarOptions) SidecarInteresting {
+func sidecarInterestingSnapshot(m *InterestingWordMatcher, opts SidecarOptions, sources *sidecarSourceCatalog) SidecarInteresting {
 	if m == nil {
 		return SidecarInteresting{}
 	}
 	out := SidecarInteresting{
 		Name:      m.mName,
-		Top:       sidecarWordEntries(m, opts.TopLimit, opts),
-		Peaks:     sidecarPeakWordEntries(m, opts.TopLimit, opts),
+		Top:       sidecarWordEntries(m, opts.TopLimit, opts, sources),
+		Peaks:     sidecarPeakWordEntries(m, opts.TopLimit, opts, sources),
 		TotalKeys: len(m.wordFrequency),
 		Metadata: map[string]interface{}{
 			"push_interval_count": m.pushIntervalCount,
@@ -551,12 +593,12 @@ func sidecarInterestingSnapshot(m *InterestingWordMatcher, opts SidecarOptions) 
 		},
 	}
 	if m.mName == "ips" && m.ipScratch != nil {
-		out.IPGroups = sidecarIPGroupEntries(m, opts.TopLimit, opts)
+		out.IPGroups = sidecarIPGroupEntries(m, opts.TopLimit, opts, sources)
 	}
 	return out
 }
 
-func sidecarWordEntries(m *InterestingWordMatcher, limit int, opts SidecarOptions) []SidecarWordEntry {
+func sidecarWordEntries(m *InterestingWordMatcher, limit int, opts SidecarOptions, sources *sidecarSourceCatalog) []SidecarWordEntry {
 	entries := make([]SidecarWordEntry, 0, len(m.wordFrequency))
 	for key, stats := range m.wordFrequency {
 		entries = append(entries, sidecarWordEntry(m, key, stats, opts))
@@ -567,10 +609,12 @@ func sidecarWordEntries(m *InterestingWordMatcher, limit int, opts SidecarOption
 		}
 		return entries[i].Score > entries[j].Score
 	})
-	return rankAndLimitWordEntries(entries, limit)
+	entries = rankAndLimitWordEntries(entries, limit)
+	attachWordSourceRefs(entries, sources)
+	return entries
 }
 
-func sidecarPeakWordEntries(m *InterestingWordMatcher, limit int, opts SidecarOptions) []SidecarWordEntry {
+func sidecarPeakWordEntries(m *InterestingWordMatcher, limit int, opts SidecarOptions, sources *sidecarSourceCatalog) []SidecarWordEntry {
 	entries := make([]SidecarWordEntry, 0, len(m.peakWords))
 	for _, key := range m.peakWords {
 		stats := m.wordFrequency[key]
@@ -585,7 +629,9 @@ func sidecarPeakWordEntries(m *InterestingWordMatcher, limit int, opts SidecarOp
 		}
 		return entries[i].Score > entries[j].Score
 	})
-	return rankAndLimitWordEntries(entries, limit)
+	entries = rankAndLimitWordEntries(entries, limit)
+	attachWordSourceRefs(entries, sources)
+	return entries
 }
 
 func sidecarWordEntry(m *InterestingWordMatcher, key string, stats *WordStats, opts SidecarOptions) SidecarWordEntry {
@@ -614,6 +660,13 @@ func sidecarWordEntry(m *InterestingWordMatcher, key string, stats *WordStats, o
 		IsPeak:           m.peakWordsSet[key],
 		Source:           source,
 	}
+	if opts.IncludeSourceExamples {
+		entry.exampleLine = representativeLogLine(
+			stats.lastLogLine,
+			stats.firstIntervalLogLine,
+			lineSourceLogLine(stats.source),
+		)
+	}
 	if opts.IncludeHistories {
 		entry.History = historyCopy
 	}
@@ -622,6 +675,63 @@ func sidecarWordEntry(m *InterestingWordMatcher, key string, stats *WordStats, o
 		entry.LastLine = stats.lastLogLine
 	}
 	return entry
+}
+
+// sidecarSourceCatalog interns representative lines once per interval. Entry
+// references remain small even when the same request produced several words,
+// a referrer, an IP, and both top and peak entries.
+type sidecarSourceCatalog struct {
+	refs  map[string]int
+	items []string
+}
+
+func newSidecarSourceCatalog() *sidecarSourceCatalog {
+	return &sidecarSourceCatalog{refs: make(map[string]int)}
+}
+
+func (c *sidecarSourceCatalog) add(line string) int {
+	if c == nil || line == "" {
+		return 0
+	}
+	if ref := c.refs[line]; ref != 0 {
+		return ref
+	}
+	c.items = append(c.items, line)
+	ref := len(c.items) // References are one-based so zero remains omitted.
+	c.refs[line] = ref
+	return ref
+}
+
+func (c *sidecarSourceCatalog) lines() []string {
+	if c == nil || len(c.items) == 0 {
+		return nil
+	}
+	return c.items
+}
+
+func attachWordSourceRefs(entries []SidecarWordEntry, sources *sidecarSourceCatalog) {
+	if sources == nil {
+		return
+	}
+	for i := range entries {
+		entries[i].SourceLineRef = sources.add(entries[i].exampleLine)
+	}
+}
+
+func representativeLogLine(candidates ...string) string {
+	for _, line := range candidates {
+		if line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+func lineSourceLogLine(source *lineSource) string {
+	if source == nil {
+		return ""
+	}
+	return source.logLine
 }
 
 type sidecarIPGroupMetrics struct {
@@ -654,7 +764,7 @@ func sidecarMetricsForIPGroup(m *InterestingWordMatcher, prefix string) sidecarI
 	return metrics
 }
 
-func sidecarIPGroupEntries(m *InterestingWordMatcher, limit int, opts SidecarOptions) []SidecarIPGroupEntry {
+func sidecarIPGroupEntries(m *InterestingWordMatcher, limit int, opts SidecarOptions, sources *sidecarSourceCatalog) []SidecarIPGroupEntry {
 	defer m.topTracker.Reset()
 	_ = m.topWordEntries()
 	_, _ = m.displayIpGroups()
@@ -681,6 +791,13 @@ func sidecarIPGroupEntries(m *InterestingWordMatcher, limit int, opts SidecarOpt
 			MarkedState:     markedState,
 			MarkedByMatcher: markedByMatcher,
 		}
+		if opts.IncludeSourceExamples {
+			entry.exampleLine = representativeLogLine(
+				m.ipScratch.prefixLastLines[prefix],
+				m.ipScratch.prefixFirstIntervalLines[prefix],
+				m.ipScratch.prefixFirstLines[prefix],
+			)
+		}
 		if opts.IncludeHistories {
 			entry.History = history
 		}
@@ -706,6 +823,9 @@ func sidecarIPGroupEntries(m *InterestingWordMatcher, limit int, opts SidecarOpt
 		entries[i].Burstiness = metrics.burstiness
 		entries[i].AgentDeltaMetric = metrics.agentDeltaMetric
 		entries[i].Rank = i + 1
+		if sources != nil {
+			entries[i].SourceLineRef = sources.add(entries[i].exampleLine)
+		}
 	}
 	return entries
 }
@@ -775,11 +895,16 @@ func sidecarFactoids(limit int) []SidecarFactoid {
 		return nil
 	}
 	out := make([]SidecarFactoid, 0, limit)
-	for len(out) < limit {
+	// Low-rank ticker tips remain ephemeral. Allow a few replacement draws so a
+	// discarded tip does not crowd a retained observation out of this interval.
+	for attempts := 0; attempts < limit*4 && len(out) < limit; attempts++ {
 		text, probability, name := facts.NextBackground()
 		text = strings.TrimSpace(stripBrackets(text))
 		if text == "" {
 			break
+		}
+		if !retainFactoidRank(probability) {
+			continue
 		}
 		out = append(out, SidecarFactoid{
 			Name:        name,
@@ -923,11 +1048,14 @@ func sumIntSlice(in []int) int {
 	return total
 }
 
-func sidecarEventTime(m *Monitor) time.Time {
+// sidecarLogTime exposes PattyGraph's source-derived model clock. Epoch marks
+// records emitted before parsing establishes a log time; wall time is never a
+// substitute for traffic context.
+func sidecarLogTime(m *Monitor) time.Time {
 	if m != nil && !m.logtime.IsZero() {
 		return m.logtime
 	}
-	return time.Now()
+	return time.Unix(0, 0).UTC()
 }
 
 func newSidecarSessionID() string {
@@ -952,6 +1080,14 @@ Enable JSONL output from the CLI:
   pattyGraph --json
   pattyGraph --json-file current.jsonl
 
+Optionally retain representative source lines for emitted interesting entries:
+  pattyGraph --json --json-sources
+  !!! json-sources on
+
+The json-sources setting is independent from JSONL output. It can be changed
+while JSONL is off and will apply if output is enabled later. Runtime changes
+affect subsequent interval records without rewriting earlier records.
+
 Recommended quick AI startup pattern to start and read the last 10M of log file:
   pattyGraph --json --read 10 --config splats/pattyGraph.conf /path/to/access.log
 
@@ -975,14 +1111,13 @@ running multiple PattyGraph processes with the same save-dir.
 JSONL Record types:
   session_start
       First record in the file. Contains process/session metadata, CLI args,
-      output_path, file_path, machine name, and session_id. Its timestamp is
-      wall-clock process startup time.
+      output_path, file_path, machine name, and session_id. It is a structural
+      record, not a chronological point on the traffic timeline.
 
   interval
       One completed push interval. Contains core matcher counts, top words,
       top refs, top IPs, IP groups, factoids, summary metrics, and totals.
-      Its timestamp is the log-derived time PattyGraph read from the access log,
-      not wall-clock process time.
+      Its log_time is derived from the access log, not wall-clock process time.
 
   control_command
       Immediate acknowledgement for a command consumed from pattyControl.log
@@ -999,7 +1134,9 @@ Important fields:
   schema_version   Version of the pattyLog JSON schema.
   event_type       session_start, interval, control_command, or alert.
   session_id       Stable id shared by all records in one file.
-  timestamp        Wall time for session_start; log time for interval records.
+  log_time         Preferred source-derived model clock. Unix epoch means the
+                   log clock had not been established when the record was made.
+  timestamp        Schema 4 compatibility alias for log_time.
   interval         PattyGraph interval number.
   interval_lines   Log lines seen in this interval.
   matchers         Core matcher summaries such as Googlebot, bingbot, Bots,
@@ -1191,8 +1328,8 @@ State which source supports your conclusions:
   "from targeted raw-log searches"
 
 Do not claim second-by-second behavior unless you observed the live TUI or have
-records at that resolution. JSONL pattyLog interval timestamps are log-derived for
-interval records and wall-clock for session_start/control_command records.
+records at that resolution. Use log_time for traffic context and JSONL order for
+processing order. Never place session_start on the traffic timeline by its time.
 
 Do not paste or ingest large raw logs unless the human specifically asks.
 Prefer small, targeted searches based on PattyGraph findings.

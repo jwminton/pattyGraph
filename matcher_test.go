@@ -363,14 +363,14 @@ func TestBotsMigrationInvalidatesMatchedDisplayCache(t *testing.T) {
 	)
 	match(line)
 
-	before := PattyGraph.botsMatcher.displayMatched()
+	before := PattyGraph.botsMatcher.renderDetailListing()
 	if !strings.Contains(before, "Googlebot") {
 		t.Fatalf("pre-migration Bots display = %q, want Googlebot", before)
 	}
 
 	PattyGraph.botsMatcher.migrateBots(-1)
 
-	after := PattyGraph.botsMatcher.displayMatched()
+	after := PattyGraph.botsMatcher.renderDetailListing()
 	if strings.Contains(after, "Googlebot") {
 		t.Fatalf("post-migration Bots display still contains Googlebot: %q", after)
 	}

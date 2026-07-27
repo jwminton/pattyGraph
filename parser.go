@@ -139,7 +139,8 @@ func splitLogLineParts(fullLine string) (string, string, string, string, string,
 	return request, resp, bytes, referer, agent, nil
 }
 
-// Executed once a cycle for status display only
+// Executed once per cycle to establish PattyGraph's source-derived model clock.
+// Consumers reuse the cached value rather than consulting wall time.
 func extractTimestamp(s string) (*time.Time, error) {
 	start := strings.IndexByte(s, '[')
 	if start == -1 || start+21 >= len(s) {

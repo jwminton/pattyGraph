@@ -51,7 +51,7 @@ type InterestingWordMatcher struct {
 	fullFormat            string
 	ipScratch             *ipGroupScratch
 	selectedGraphCache    string
-	matchedBuilder        strings.Builder
+	detailListingBuilder  strings.Builder
 	peakBuilder           strings.Builder
 	printedEntriesScratch []string
 	// topTracker might be overkill as an LRU now, but its cost is minimal
@@ -126,6 +126,7 @@ func (m *InterestingWordMatcher) isHistoric() bool {
 func (m *InterestingWordMatcher) setColor(color string) {
 }
 func (m *InterestingWordMatcher) getCount() int { return 0 }
+func (m *InterestingWordMatcher) prePush()      {}
 func (m *InterestingWordMatcher) minMaxHistory() (int, int) {
 	return 0, 0
 }
@@ -134,7 +135,8 @@ func (m *InterestingWordMatcher) setPurgeInterval(timeToLive int) {
 	m.timeToLive = timeToLive
 }
 
-func (m *InterestingWordMatcher) displayString() string {
+// renderSparklineRow was formerly called displayString.
+func (m *InterestingWordMatcher) renderSparklineRow() string {
 	if PattyGraph.selectedInterestingMatcher == m && m.selectedKey != "" {
 		sparkBuilder := strings.Builder{}
 		fv := 0
@@ -741,7 +743,7 @@ func (m *InterestingWordMatcher) displayIpGroups() (string, []string) {
 		//recycleWordStats(fakeStat)
 	}
 	// could consolidate with the above, but its only 10 entries, figure it out later.
-	// making faux WordStats & lineSource for displayString needs later
+	// making faux WordStats & lineSource for renderSparklineRow needs later
 	for _, group := range sortedGroups {
 		//fauxSource := &lineSource{
 		//	captureColor: scratch.prefixColors[group.prefix],
@@ -826,7 +828,7 @@ func (m *InterestingWordMatcher) sortedIpGroups() ([]prefixCount, *prefixCount) 
 }
 
 // This has been left mostly un-optimized. Logic is a little messy but its correct and it never shows up on profiles
-// Consolidate printing logic makes this even more uninteresting in the grand scheme (displayMatched and ipGroups
+// Consolidate printing logic makes this even more uninteresting in the grand scheme (renderDetailListing and ipGroups
 // are far worse
 func (m *InterestingWordMatcher) displayPeakWords() (string, []string) {
 	if len(m.peakWords) == 0 {
@@ -883,10 +885,12 @@ func (m *InterestingWordMatcher) asInlineCommand() string {
 
 //var printedEntriesScratch []string = make([]string, InterestingWordListSize*2)
 
-// THIS was THE HOTTEST HOT PATH until it was optimized and displayIpGroups took that title.
-// Performance here was gained by cutting the entire list down to a manageable size asap.
-func (m *InterestingWordMatcher) displayMatched() string {
-	defer m.matchedBuilder.Reset()
+// renderDetailListing builds one selectable Words, Refs, or IPs column. This
+// was the hottest display path until displayIpGroups took that title; retaining
+// a bounded candidate set keeps its work manageable.
+// Formerly called displayMatched.
+func (m *InterestingWordMatcher) renderDetailListing() string {
+	defer m.detailListingBuilder.Reset()
 	defer m.topTracker.Reset()
 
 	entries := m.topWordEntries()
@@ -921,7 +925,7 @@ func (m *InterestingWordMatcher) displayMatched() string {
 		return entries[i].word < entries[j].word
 	})
 
-	result := m.matchedBuilder
+	result := m.detailListingBuilder
 	printedCount := 0
 	// ***** Title logLine *****
 	extra := fmt.Sprintf("(%s)", strings.TrimSpace(formatCounts(len(m.wordFrequency))))
@@ -1197,7 +1201,7 @@ func (m *InterestingWordMatcher) selectDisplayItemByKey(selection string) (int, 
 		return -1, false
 	}
 	if len(m.currentListing) == 0 {
-		m.displayString()
+		m.renderSparklineRow()
 	}
 	if len(m.currentListing) == 0 {
 		return -1, false

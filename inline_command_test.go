@@ -259,6 +259,46 @@ func TestInlineJSONRejectsInvalidBooleanValue(t *testing.T) {
 	}
 }
 
+func TestInlineJSONSourcesIsIndependentFromJSONOutput(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! json-sources on")
+	if result.Status != InlineCommandStatusApplied || result.Result["enabled"] != true {
+		t.Fatalf("json-sources on result = %#v", result)
+	}
+	if !includeSidecarSourceExamples {
+		t.Fatal("json-sources on did not enable source examples")
+	}
+	if generateSidecarJSONL {
+		t.Fatal("json-sources on enabled JSONL output")
+	}
+
+	invokeInlineCommand("!!! json on")
+	invokeInlineCommand("!!! json off")
+	if !includeSidecarSourceExamples {
+		t.Fatal("json output toggles reset source examples")
+	}
+
+	result = invokeInlineCommand("!!! json-sources off")
+	if result.Status != InlineCommandStatusApplied || result.Result["enabled"] != false {
+		t.Fatalf("json-sources off result = %#v", result)
+	}
+	if includeSidecarSourceExamples || generateSidecarJSONL {
+		t.Fatal("json-sources off changed the wrong output state")
+	}
+}
+
+func TestInlineJSONSourcesRejectsInvalidBooleanValue(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! json-sources maybe")
+
+	assertInlineInvalidArgument(t, result, "json-sources", "maybe", "json-sources requires a boolean value")
+	if includeSidecarSourceExamples || generateSidecarJSONL {
+		t.Fatal("invalid json-sources value changed output state")
+	}
+}
+
 func TestInlineAddRejectsDuplicateMatcherNameAcrossPlacementPrefixes(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 
@@ -779,9 +819,9 @@ func TestInterestingSelectionDisplayHandlesNoHistory(t *testing.T) {
 	words.currentListing = []string{"fresh"}
 	words.selectDisplayItem(0)
 
-	display := words.displayString()
+	display := words.renderSparklineRow()
 	if !strings.Contains(display, "fresh") {
-		t.Fatalf("displayString() = %q, want selected key", display)
+		t.Fatalf("renderSparklineRow() = %q, want selected key", display)
 	}
 }
 

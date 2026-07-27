@@ -66,7 +66,10 @@ var machineDisplayName string
 
 var forceZeroStart bool
 var expertMode bool
+
+// JSONL emission and source-example enrichment are independent runtime choices.
 var generateSidecarJSONL bool
+var includeSidecarSourceExamples bool
 var enableControlFile bool
 
 // metrics
@@ -182,6 +185,8 @@ func enforceCliFlags() {
 			forceZeroStart = f.Value.String() == "true"
 		case "json":
 			generateSidecarJSONL = f.Value.String() == "true"
+		case "json-sources":
+			includeSidecarSourceExamples = f.Value.String() == "true"
 		case "json-file":
 			PattyGraph.pattyConfig.setJSONFile(f.Value.String())
 			generateSidecarJSONL = PattyGraph.pattyConfig.jsonFile != ""
@@ -272,6 +277,7 @@ func preloadRecentMinutes() error {
 		// It's ok if logicalCycles is off bc of this gap.
 		if i != len(minutes)-1 || forceZeroStart {
 			logicalCycles += 60
+			prePush()
 			var sidecarSnapshot SidecarInterval
 			if generateSidecarJSONL {
 				// Startup sidecar interval: preload replays completed historical
@@ -290,6 +296,7 @@ func preloadRecentMinutes() error {
 			// if seconds went from say 57...2 we need to do a push to catch up.
 			if startTime > stopTime {
 				logicalCycles += 60
+				prePush()
 				var sidecarSnapshot SidecarInterval
 				if generateSidecarJSONL {
 					// Startup sidecar interval: wall-clock rollover means the

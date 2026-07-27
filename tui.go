@@ -196,26 +196,25 @@ func updateDisplay() {
 		PattyGraphBuilderComplex.matcherBuilder.WriteString(metricPanelContents())
 	default:
 		for _, matcherFacade := range PattyGraph.matchers {
-			matcher := matcherFacade.asMatcher()
-			if matcher != nil {
-				PattyGraphBuilderComplex.matcherBuilder.WriteString(matcher.displayMatched())
+			if matcherFacade.asMatcher() != nil {
+				PattyGraphBuilderComplex.matcherBuilder.WriteString(matcherFacade.renderDetailListing())
 			}
 		}
 	}
 	var wordsPanel, refsPanel, ipsPanel string
 	if displayFreezeCountdown == 0 {
 		// panel 2
-		wordsPanel = PattyGraph.wordsMatcher.displayMatched()
+		wordsPanel = PattyGraph.wordsMatcher.renderDetailListing()
 		// panel 3
-		refsPanel = PattyGraph.refsMatcher.displayMatched()
+		refsPanel = PattyGraph.refsMatcher.renderDetailListing()
 		// panel 4
-		ipsPanel = PattyGraph.ipsMatcher.displayMatched()
+		ipsPanel = PattyGraph.ipsMatcher.renderDetailListing()
 	}
 
 	// IMPORTANT: This must be done after word matcher matching so spoofed selection values are created
 	// Draws matcher labeling and sparkline
 	for _, matcher := range PattyGraph.matchers {
-		PattyGraphBuilderComplex.graphingBuilder.WriteString(matcher.displayString())
+		PattyGraphBuilderComplex.graphingBuilder.WriteString(matcher.renderSparklineRow())
 	}
 	if PattyGraph.showTicker {
 		PattyGraphBuilderComplex.graphingBuilder.WriteString("[default:-]")
@@ -226,9 +225,7 @@ func updateDisplay() {
 	if PattyGraph.selectedInterestingMatcher != nil {
 		PattyGraphBuilderComplex.graphingBuilder.WriteString(PattyGraph.selectedInterestingMatcher.displayLogLine())
 	}
-	if PattyGraph.selectedMatcher != nil {
-		PattyGraphBuilderComplex.graphingBuilder.WriteString(PattyGraph.selectedMatcher.displayLogLine())
-	}
+	PattyGraphBuilderComplex.graphingBuilder.WriteString(PattyGraph.selectedMatcherSourceLine())
 
 	PattyGraph.sparklineHistoryView.SetText(PattyGraphBuilderComplex.graphingBuilder.String())
 	PattyGraph.botMatchesView.SetText(PattyGraphBuilderComplex.matcherBuilder.String())
@@ -461,10 +458,7 @@ func setUIHook() {
 				func() {
 					mu.Lock()
 					defer mu.Unlock()
-					if PattyGraph.selectedMatcher == nil ||
-						PattyGraph.selectedMatcher.name == "lines" ||
-						PattyGraph.selectedMatcher.name == "bytes" ||
-						PattyGraph.selectedMatcher.name == "errs" {
+					if PattyGraph.selectedMatcher == nil || isProtectedSystemMatcher(PattyGraph.selectedMatcher) {
 						return
 					}
 
@@ -482,10 +476,7 @@ func setUIHook() {
 				func() {
 					mu.Lock()
 					defer mu.Unlock()
-					if PattyGraph.selectedMatcher == nil ||
-						PattyGraph.selectedMatcher.name == "lines" ||
-						PattyGraph.selectedMatcher.name == "bytes" ||
-						PattyGraph.selectedMatcher.name == "errs" {
+					if PattyGraph.selectedMatcher == nil || isProtectedSystemMatcher(PattyGraph.selectedMatcher) {
 						return
 					}
 					for i := 0; i < len(PattyGraph.matchers)-1; i++ {
@@ -539,7 +530,13 @@ func setUIHook() {
 			return nil
 		case tcell.KeyCtrlP:
 			// Purge! Clear all PeakWords!
-			PattyGraph.purgeAllPeakContent()
+			if PattyGraph.purgeAllPeakContent() && generateSidecarJSONL {
+				result := inlineCommandResult("purge", InlineCommandStatusApplied, "purge")
+				recordSidecarWriteResult(
+					"keyboard command",
+					PattyGraph.WriteSidecarControlCommandJSONL("^p", "keyboard", result, ""),
+				)
+			}
 			return nil
 		case tcell.KeyCtrlD:
 			func() {
@@ -644,12 +641,19 @@ func setUIHook() {
 	})
 }
 
+func (m *Monitor) selectedMatcherSourceLine() string {
+	if m == nil || m.selectedMatcher == nil || !m.selectedMatcher.displaysSelectedSourceLine() {
+		return ""
+	}
+	return m.selectedMatcher.displayLogLine()
+}
+
 func (m *Monitor) setSelectedMatcher(matcher *Matcher) {
 	if m.selectedMatcher != nil {
-		m.selectedMatcher.displayMatchedCache = ""
+		m.selectedMatcher.detailListingCache = ""
 	}
 	if matcher != nil {
-		matcher.displayMatchedCache = ""
+		matcher.detailListingCache = ""
 		if m.showTicker {
 			matcher.pushStats()
 		}
@@ -690,11 +694,11 @@ func (m *Monitor) matcherAtDetailRow(row int) *Matcher {
 			continue
 		}
 		firstRow := facadeIndex + expandedRows
-		lastRow := firstRow + matcher.matchedDisplayCount
+		lastRow := firstRow + matcher.detailRowCount
 		if row >= firstRow && row <= lastRow {
 			return matcher
 		}
-		expandedRows += matcher.matchedDisplayCount
+		expandedRows += matcher.detailRowCount
 	}
 	return nil
 }
@@ -750,6 +754,7 @@ func startUI() {
 					updateDisplay()
 				}
 				if currentCycle >= DefaultIntervalSize {
+					prePush()
 					var sidecarSnapshot SidecarInterval
 					if generateSidecarJSONL {
 						// Sidecar interval event: capture the just-completed interval before
@@ -795,7 +800,8 @@ func layoutUI() {
 
 func (m *Monitor) sparkPanelHeight() int {
 	h := len(m.matchers) - 1 // plain unadjusted height
-	if m.selectedMatcher != nil || m.selectedInterestingMatcher != nil {
+	selectedMatcherSource := m.selectedMatcher != nil && m.selectedMatcher.displaysSelectedSourceLine()
+	if selectedMatcherSource || m.selectedInterestingMatcher != nil {
 		h += 2 // adding two lines for linesource at the end
 	}
 	if m.selectedInterestingMatcher != nil {

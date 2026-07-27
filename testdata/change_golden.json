@@ -1,0 +1,121 @@
+{
+  "cases": [
+    {
+      "name": "scalar movement",
+      "reference": {
+        "lines": 1000,
+        "bytes": 1048576,
+        "errors": 10,
+        "marked": 100,
+        "b16": 300,
+        "word_peaks": [],
+        "ref_peaks": [],
+        "ip_peaks": [],
+        "word_wave": []
+      },
+      "selected": {
+        "lines": 1250,
+        "bytes": 1310720,
+        "errors": 20,
+        "marked": 175,
+        "b16": 525,
+        "word_peaks": [],
+        "ref_peaks": [],
+        "ip_peaks": [],
+        "word_wave": []
+      },
+      "expected": {
+        "score": 30.25,
+        "primary": "errs",
+        "components": [
+          { "key": "errs", "score": 50 },
+          { "key": "marked", "score": 50 },
+          { "key": "b16", "score": 50 },
+          { "key": "lines", "score": 39.024390243902445 },
+          { "key": "bytes", "score": 39.024390243902445 },
+          { "key": "avg bytes/line", "score": 0 },
+          { "key": "peak balance", "score": 0 },
+          { "key": "word wave", "score": 0 }
+        ]
+      }
+    },
+    {
+      "name": "proportional volume",
+      "reference": {
+        "lines": 1000,
+        "bytes": 1048576,
+        "errors": 0,
+        "marked": 50,
+        "b16": 600,
+        "word_peaks": [{ "key": "catalog", "count": 80 }, { "key": "search", "count": 20 }],
+        "ref_peaks": [{ "key": "home", "count": 70 }, { "key": "docs", "count": 30 }],
+        "ip_peaks": [{ "key": "192.0.2", "count": 100 }],
+        "word_wave": [{ "key": "checkout", "count": 30 }, { "key": "login", "count": 10 }]
+      },
+      "selected": {
+        "lines": 2000,
+        "bytes": 2097152,
+        "errors": 0,
+        "marked": 100,
+        "b16": 1200,
+        "word_peaks": [{ "key": "catalog", "count": 160 }, { "key": "search", "count": 40 }],
+        "ref_peaks": [{ "key": "home", "count": 140 }, { "key": "docs", "count": 60 }],
+        "ip_peaks": [{ "key": "192.0.2", "count": 200 }],
+        "word_wave": [{ "key": "checkout", "count": 60 }, { "key": "login", "count": 20 }]
+      },
+      "expected": {
+        "score": 67.89760000000001,
+        "primary": "lines",
+        "components": [
+          { "key": "lines", "score": 80 },
+          { "key": "bytes", "score": 80 },
+          { "key": "avg bytes/line", "score": 0 },
+          { "key": "errs", "score": 0 },
+          { "key": "marked", "score": 0 },
+          { "key": "b16", "score": 0 },
+          { "key": "peak balance", "score": 0 },
+          { "key": "word wave", "score": 0 }
+        ]
+      }
+    },
+    {
+      "name": "distribution movement",
+      "reference": {
+        "lines": 1000,
+        "bytes": 1048576,
+        "errors": 10,
+        "marked": 100,
+        "b16": 500,
+        "word_peaks": [{ "key": "catalog", "count": 80 }, { "key": "search", "count": 20 }],
+        "ref_peaks": [{ "key": "home", "count": 70 }, { "key": "docs", "count": 30 }],
+        "ip_peaks": [{ "key": "192.0.2", "count": 100 }],
+        "word_wave": [{ "key": "checkout", "count": 90 }, { "key": "login", "count": 10 }]
+      },
+      "selected": {
+        "lines": 1000,
+        "bytes": 1048576,
+        "errors": 10,
+        "marked": 100,
+        "b16": 500,
+        "word_peaks": [{ "key": "catalog", "count": 20 }, { "key": "search", "count": 80 }],
+        "ref_peaks": [{ "key": "home", "count": 60 }, { "key": "docs", "count": 40 }],
+        "ip_peaks": [{ "key": "192.0.2", "count": 100 }],
+        "word_wave": [{ "key": "checkout", "count": 10 }, { "key": "login", "count": 90 }]
+      },
+      "expected": {
+        "score": 95.18707799612385,
+        "primary": "peak balance",
+        "components": [
+          { "key": "peak balance", "score": 97.29729729729729 },
+          { "key": "word wave", "score": 65.75342465753425 },
+          { "key": "lines", "score": 0 },
+          { "key": "bytes", "score": 0 },
+          { "key": "avg bytes/line", "score": 0 },
+          { "key": "errs", "score": 0 },
+          { "key": "marked", "score": 0 },
+          { "key": "b16", "score": 0 }
+        ]
+      }
+    }
+  ]
+}

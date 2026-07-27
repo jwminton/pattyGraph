@@ -37,6 +37,7 @@ func resetRuntimeGlobalsForTest() {
 	forceZeroStart = false
 	expertMode = false
 	generateSidecarJSONL = false
+	includeSidecarSourceExamples = false
 	enableControlFile = false
 	sidecarWriteFailures = 0
 	doRandomFact = false
@@ -103,6 +104,7 @@ func TestSetupMonitorPipelineTestGraphResetsRuntimeGlobals(t *testing.T) {
 	fluxDepth = 9
 	colorIndex = 5
 	generateSidecarJSONL = true
+	includeSidecarSourceExamples = true
 	enableControlFile = true
 	sidecarWriteFailures = 2
 	doRandomFact = true
@@ -123,7 +125,7 @@ func TestSetupMonitorPipelineTestGraphResetsRuntimeGlobals(t *testing.T) {
 		colorIndex != 0 {
 		t.Fatal("setup did not restore default settings")
 	}
-	if generateSidecarJSONL || enableControlFile || sidecarWriteFailures != 0 || doRandomFact {
+	if generateSidecarJSONL || includeSidecarSourceExamples || enableControlFile || sidecarWriteFailures != 0 || doRandomFact {
 		t.Fatal("setup did not restore output and control state")
 	}
 	_, staleColorPresent := matcherColorMap["stale"]
@@ -291,7 +293,7 @@ func TestNewMonitorNoConfigStartupMatcherShape(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 
 	got := matcherNamesForTest(PattyGraph.matchers)
-	want := []string{"Bots", "lines", "bytes", "errs", "words", "refs", "ips"}
+	want := []string{"Bots", "lines", "bytes", "errs", "change", "words", "refs", "ips"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("matcher order = %v, want %v", got, want)
 	}

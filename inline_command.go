@@ -591,9 +591,7 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			result.Result["from_top"] = fromTop
 			return result
 		}
-		if matcher == PattyGraph.bytesMatcher ||
-			matcher == PattyGraph.linesMatcher ||
-			matcher == PattyGraph.errsMatcher {
+		if isProtectedSystemMatcher(matcher) {
 			result := inlineCommandRejected(cmd, "delete_matcher", "matcher cannot be deleted")
 			result.Result["matcher_name"] = name
 			result.Result["from_top"] = fromTop
@@ -894,7 +892,7 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 			}
 			return result
 		}
-		if strings.EqualFold(cmd, "json") || strings.EqualFold(cmd, "control") {
+		if strings.EqualFold(cmd, "json") || strings.EqualFold(cmd, "json-sources") || strings.EqualFold(cmd, "control") {
 			normalizedValue, ok := inlineBoolValue(value)
 			if !ok {
 				return inlineCommandInvalidArgument(cmd, "set_flag", strings.ToLower(cmd), value, strings.ToLower(cmd)+" requires a boolean value")
@@ -910,6 +908,8 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		result.Result["value"] = value
 		if strings.EqualFold(cmd, "json") {
 			result.Result["enabled"] = generateSidecarJSONL
+		} else if strings.EqualFold(cmd, "json-sources") {
+			result.Result["enabled"] = includeSidecarSourceExamples
 		}
 		return result
 	}
@@ -1050,7 +1050,7 @@ func setMatcherMode(name string, newMode int) {
 		return
 	}
 	namedMatcher.displayMatchMode = newMode % 3
-	namedMatcher.displayMatchedCache = ""
+	namedMatcher.detailListingCache = ""
 }
 
 func colorInUse(color string) bool {
@@ -1086,10 +1086,7 @@ func removeMatcherFromTop(name string, fromTop bool) {
 			}
 		}
 	}
-	if matcher == nil ||
-		matcher == PattyGraph.bytesMatcher ||
-		matcher == PattyGraph.linesMatcher ||
-		matcher == PattyGraph.errsMatcher {
+	if matcher == nil || isProtectedSystemMatcher(matcher) {
 		return
 	}
 	if matcher == PattyGraph.botsMatcher {
@@ -1117,6 +1114,8 @@ func purgePeakWordCommand() {
 	PattyGraph.wordsMatcher.purgePeakWords()
 	PattyGraph.refsMatcher.purgePeakWords()
 	PattyGraph.ipsMatcher.purgePeakWords()
+	PattyGraph.changeMatcher.resetPeakBaseline()
+	_, _ = pushFactSnapshotNow("model.peakReset", nil)
 }
 func pattySplat() (string, error) {
 	path, err := PattyGraph.printToFile()
@@ -1176,6 +1175,11 @@ func writeConfig(w io.Writer) error {
 		}
 	} else if generateSidecarJSONL {
 		if err := write(InlinePreamble + " json on\n"); err != nil {
+			return err
+		}
+	}
+	if includeSidecarSourceExamples {
+		if err := write(InlinePreamble + " json-sources on\n"); err != nil {
 			return err
 		}
 	}
@@ -1287,6 +1291,16 @@ func SetFlagByName(key string, value string) bool {
 		}
 		if value == "off" {
 			generateSidecarJSONL = false
+			return true
+		}
+		return false
+	case "json-sources":
+		if value == "on" {
+			includeSidecarSourceExamples = true
+			return true
+		}
+		if value == "off" {
+			includeSidecarSourceExamples = false
 			return true
 		}
 		return false

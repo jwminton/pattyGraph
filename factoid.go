@@ -35,6 +35,14 @@ var factoidByName = map[string]*Factoid{}
 type FactoidFunc func(args []string) string
 type FactoidSchedule func(cycle int, lastSeen int, shown bool) bool
 
+// Low-rank observations such as tips may pass through the live ticker without
+// becoming retained factoid-panel or PattyLog interval content.
+const minimumFactoidRetentionRank = 5
+
+func retainFactoidRank(rank int) bool {
+	return rank >= minimumFactoidRetentionRank
+}
+
 // Factoid describes one named observation PattyGraph can surface. Condition
 // controls when the observation is eligible; Generate reads live process state
 // and returns already-marked-up display text.
@@ -43,7 +51,7 @@ type Factoid struct {
 	Name        string
 	Generate    FactoidFunc
 	Condition   FactoidSchedule
-	probability int // schedule percentage and factoid-history inclusion rank
+	probability int // schedule percentage and retained-output inclusion rank
 	LastSeen    int
 	Shown       bool
 	cache       string
@@ -54,7 +62,7 @@ type Factoid struct {
 // preserve the compact registration style while making the scheduling policy
 // explicit and reusable. probability is intentionally retained as both the
 // schedule percentage and the rank used when deciding whether a shown factoid is
-// important enough for the factoid history panel.
+// important enough for the factoid history panel and PattyLog interval records.
 func Scheduled(probability int, schedule FactoidSchedule, f FactoidFunc) *Factoid {
 	return &Factoid{
 		Generate:    f,
@@ -303,6 +311,9 @@ func NewFactoidGenerator() *FactoidGenerator {
 		}
 		return internalFmt("Note:") + "[white] " + args[0] + "[-:-:-:-]"
 	}), "print")
+	g.Add(DirectOnly(func(_ []string) string {
+		return internalFmt("Peak memory reset: starting fresh")
+	}), "model", "peakReset")
 
 	g.Add(Random(1, func(_ []string) string {
 		return fmt.Sprintf(toolFmt("Init(%s):%s/%slines"),
@@ -612,20 +623,6 @@ func NewFactoidGenerator() *FactoidGenerator {
 			saveState,
 			failState)
 	}), "output", "paths")
-	//g.Add(Random(5, func(_ []string) string {
-	//	marked := PattyGraph.intervalLines - PattyGraph.unmarked
-	//	total := PattyGraph.intervalLines
-	//	if total < 100 {
-	//		return "" // bail if its < 100 lines
-	//	}
-	//	percent := 0.0
-	//	if total > 0 {
-	//		percent = (float64(marked) / float64(total)) * 100
-	//	}
-	//	return fmt.Sprintf(toolFmt("Returns:%d/%d(%.1f%%)"),
-	//		marked, total, percent)
-	//}))
-
 	//g.Add(Random(5, func(_ []string) string {
 	//	return fmt.Sprintf("Strings:[palegreen]%s[default]",
 	//		strings.TrimSpace(formatCounts(stringInterner.list.Len())))
