@@ -48,9 +48,11 @@ function RecordListItem({ record, selected, onSelect }: {
       <Icon size={16} aria-hidden="true" />
       <span class="record-list-copy">
         <strong>{title}</strong>
-        <small>{subtitle}</small>
+        <span class="record-list-meta">
+          <small>{subtitle}</small>
+          <span class="record-list-value">{detail}</span>
+        </span>
       </span>
-      <span class="record-list-value">{detail}</span>
     </button>
   )
 }
@@ -370,4 +372,3 @@ function displayValue(value: JsonValue): string {
   }
   return String(value)
 }
-

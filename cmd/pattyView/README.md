@@ -140,8 +140,10 @@ npm run build
 ```
 
 Vite is the sole producer of `dist/`; edit the TypeScript, TSX, or CSS source
-rather than generated assets. After a build, the static application can also be
-served without the Go launcher:
+rather than generated assets. The generated asset names are stable public
+artifacts; the Go launcher serves them with caching disabled so a replaced
+executable cannot reuse stale frontend code. After a build, the static
+application can also be served without the Go launcher:
 
 ```bash
 python3 -m http.server 4177 --bind 127.0.0.1 --directory dist

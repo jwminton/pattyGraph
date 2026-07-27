@@ -85,6 +85,7 @@ func embeddedHandler() (http.Handler, error) {
 			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		response.Header().Set("Cache-Control", "no-store")
 		files.ServeHTTP(response, request)
 	}), nil
 }

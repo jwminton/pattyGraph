@@ -633,7 +633,7 @@ summary:focus-visible {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
@@ -745,7 +745,7 @@ summary:focus-visible {
   height: 52px;
   min-height: 52px;
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: 20px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 7px 11px;
@@ -796,6 +796,18 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
+.record-list-meta {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.record-list-meta small {
+  min-width: 0;
+}
+
 .record-list-copy small,
 .record-list-value {
   color: #89928b;
@@ -803,6 +815,7 @@ summary:focus-visible {
 }
 
 .record-list-value {
+  flex: none;
   max-width: 78px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1528,7 +1541,7 @@ summary:focus-visible {
 
 .signal-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   border-top: 1px solid #303531;
   border-left: 1px solid #303531;
 }
@@ -1536,7 +1549,7 @@ summary:focus-visible {
 .signal {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(68px, 1.2fr) repeat(4, minmax(58px, 1fr));
+  grid-template-columns: minmax(56px, 1.05fr) repeat(4, minmax(0, 1fr));
   align-items: center;
   border-right: 1px solid #303531;
   border-bottom: 1px solid #303531;
@@ -1544,13 +1557,13 @@ summary:focus-visible {
 
 .signal > div {
   min-width: 0;
-  padding: 9px 8px;
+  padding: 9px 5px;
 }
 
 .signal-name {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
 }
 
 .signal span,
@@ -2237,10 +2250,6 @@ summary:focus-visible {
 
   .field-table {
     grid-template-columns: repeat(2, minmax(150px, 1fr));
-  }
-
-  .signal-grid {
-    grid-template-columns: 1fr;
   }
 
   .traffic-metrics {

@@ -2,10 +2,8 @@ package main
 
 import (
 	"bytes"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -47,42 +45,46 @@ func TestEmbeddedHandlerServesApplicationAssets(t *testing.T) {
 	if !strings.Contains(body, `<div id="app"></div>`) {
 		t.Fatal("embedded index does not contain the PattyView application root")
 	}
+	assertNoStore(t, index)
 
-	assetPattern := regexp.MustCompile(`(?:src|href)="(/assets/[^"]+)"`)
-	assets := assetPattern.FindAllStringSubmatch(body, -1)
-	if len(assets) < 2 {
-		t.Fatalf("index referenced %d assets, want at least JavaScript and CSS", len(assets))
-	}
+	assets := []string{"/assets/pattyView.js", "/assets/pattyView.css"}
 	for _, asset := range assets {
-		response := requestEmbedded(t, handler, http.MethodGet, asset[1], http.StatusOK)
+		if !strings.Contains(body, `"`+asset+`"`) {
+			t.Errorf("embedded index does not reference %s", asset)
+		}
+		response := requestEmbedded(t, handler, http.MethodGet, asset, http.StatusOK)
+		assertNoStore(t, response)
 		contentType := response.Header().Get("Content-Type")
 		switch {
-		case strings.HasSuffix(asset[1], ".js") && !strings.Contains(contentType, "javascript"):
-			t.Errorf("JavaScript asset %q content type = %q", asset[1], contentType)
-		case strings.HasSuffix(asset[1], ".css") && !strings.Contains(contentType, "text/css"):
-			t.Errorf("CSS asset %q content type = %q", asset[1], contentType)
+		case strings.HasSuffix(asset, ".js") && !strings.Contains(contentType, "javascript"):
+			t.Errorf("JavaScript asset %q content type = %q", asset, contentType)
+		case strings.HasSuffix(asset, ".css") && !strings.Contains(contentType, "text/css"):
+			t.Errorf("CSS asset %q content type = %q", asset, contentType)
 		}
 	}
 
-	workers, err := fs.Glob(embeddedDist, "dist/assets/*.worker-*.js")
-	if err != nil {
-		t.Fatalf("find embedded worker: %v", err)
-	}
-	if len(workers) == 0 {
-		t.Fatal("embedded build does not contain the PattyLog parser worker")
-	}
-	for _, worker := range workers {
-		requestEmbedded(t, handler, http.MethodGet, strings.TrimPrefix(worker, "dist"), http.StatusOK)
+	worker := requestEmbedded(t, handler, http.MethodGet, "/assets/jsonl.worker.js", http.StatusOK)
+	assertNoStore(t, worker)
+	if contentType := worker.Header().Get("Content-Type"); !strings.Contains(contentType, "javascript") {
+		t.Errorf("worker content type = %q", contentType)
 	}
 }
 
 func TestEmbeddedHandlerSupportsHeadAndRejectsOtherMethods(t *testing.T) {
 	handler := mustEmbeddedHandler(t)
-	requestEmbedded(t, handler, http.MethodHead, "/", http.StatusOK)
+	head := requestEmbedded(t, handler, http.MethodHead, "/", http.StatusOK)
+	assertNoStore(t, head)
 
 	response := requestEmbedded(t, handler, http.MethodPost, "/", http.StatusMethodNotAllowed)
 	if response.Header().Get("Allow") != "GET, HEAD" {
 		t.Fatalf("Allow header = %q", response.Header().Get("Allow"))
+	}
+}
+
+func assertNoStore(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if cacheControl := response.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", cacheControl)
 	}
 }
 
