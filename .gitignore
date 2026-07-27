@@ -1,5 +1,12 @@
 # Build output
-dist/
+/dist/
+
+# PattyView local dependencies and generated test output
+cmd/pattyView/node_modules/
+cmd/pattyView/.vite/
+cmd/pattyView/coverage/
+cmd/pattyView/playwright-report/
+cmd/pattyView/test-results/
 
 # Go build/test artifacts
 /pattyGraph

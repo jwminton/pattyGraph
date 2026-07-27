@@ -1,13 +1,19 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Copyright 2026 Jasen Minton
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# This srcipt is meant for distribution specific binary constructions.
+# Build the production frontend, compile both tools, and package one archive per
+# target platform. Run this script from anywhere inside a release checkout.
 
+set -euo pipefail
 
-# The name of your output binary
+ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+cd "$ROOT_DIR"
+
 APP_NAME="pattyGraph"
+VIEW_NAME="pattyView"
+VIEW_DIR="cmd/pattyView"
 
 if [ ! -f util.go ]; then
     echo "Unable to determine ${APP_NAME} version: util.go was not found." >&2
@@ -22,51 +28,59 @@ if [ -z "$RAW_VERSION" ]; then
     exit 1
 fi
 
+VIEW_VERSION=$(sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$VIEW_DIR/package.json" | head -n 1)
+if [ "$VIEW_VERSION" != "$RAW_VERSION" ]; then
+    echo "Version mismatch: PattyGraph is $RAW_VERSION but PattyView is ${VIEW_VERSION:-unset}." >&2
+    exit 1
+fi
+
 if [[ "$RAW_VERSION" == v* ]]; then
     VERSION="$RAW_VERSION"
 else
     VERSION="v$RAW_VERSION"
 fi
 
-# Platforms you want to build for
 platforms=("linux/amd64" "linux/arm64")
 
 LD_FLAGS='-s -w'
 
-if [ "$1" = "--debug" ] || [ "$1" = "--profile" ]; then
+if [ "${1:-}" = "--debug" ] || [ "${1:-}" = "--profile" ]; then
     LD_FLAGS=''
 fi
 
-echo "Using ${APP_NAME} version $VERSION from util.go"
+echo "Building ${APP_NAME} and ${VIEW_NAME} $VERSION"
+echo "Installing pinned PattyView frontend dependencies..."
+(
+    cd "$VIEW_DIR"
+    npm ci
+    echo "Building PattyView frontend assets for Go embedding..."
+    npm run build
+)
 
-# Build binaries
 for platform in "${platforms[@]}"; do
     IFS="/" read -r GOOS GOARCH <<< "$platform"
-    
-    # Create a directory for each platform
+
     output_dir="dist/${GOOS}-${GOARCH}"
     mkdir -p "$output_dir"
-    
-    # Set the output name, adding .exe for Windows builds
-    output_name="$output_dir/$APP_NAME"
+
+    graph_output="$output_dir/$APP_NAME"
+    view_output="$output_dir/$VIEW_NAME"
     if [ "$GOOS" = "windows" ]; then
-        output_name+=".exe"
+        graph_output+=".exe"
+        view_output+=".exe"
     fi
 
-    echo "Building for $GOOS/$GOARCH in directory ./$output_dir..."
-    env GOOS=$GOOS GOARCH=$GOARCH go build -ldflags="$LD_FLAGS" -o "$output_name" .  
-    if [ $? -ne 0 ]; then
-        echo "An error occurred while building for $platform"
-        exit 1
-    fi
+    echo "Building ${APP_NAME} for $GOOS/$GOARCH..."
+    env GOOS="$GOOS" GOARCH="$GOARCH" go build -ldflags="$LD_FLAGS" -o "$graph_output" .
+
+    echo "Building ${VIEW_NAME} for $GOOS/$GOARCH..."
+    env GOOS="$GOOS" GOARCH="$GOARCH" go build -ldflags="$LD_FLAGS" -o "$view_output" ./cmd/pattyView
 
     archive_name="${output_dir}/${APP_NAME}-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
     echo "Creating release archive ./$archive_name..."
-    tar -C "$output_dir" -czf "$archive_name" "$(basename "$output_name")"
-    if [ $? -ne 0 ]; then
-        echo "An error occurred while creating archive for $platform"
-        exit 1
-    fi
+    tar -C "$output_dir" -czf "$archive_name" \
+        "$(basename "$graph_output")" \
+        "$(basename "$view_output")"
 done
 
-echo "Build complete!"
+echo "Build complete. Each release archive contains ${APP_NAME} and ${VIEW_NAME}."

@@ -19,8 +19,28 @@ operators.
 
 ![PattyGraph live TUI with matcher sparklines and ranked traffic context](docs/images/pattyGraph-startup.gif)
 
+## PattyView: Move Through The Recorded Traffic Model
+
+PattyView is the local browser companion to PattyGraph. It opens PattyLog JSONL
+as a searchable interval map for navigating traffic history, comparing two
+moments, following Change and alert activity, and returning to retained evidence.
+
+In current large-file testing, PattyGraph reduced 3 GB of access log into
+approximately 250 MB of structured PattyLog in under a minute. PattyView loaded
+that recorded model faster than it was created and made the full session
+navigable on an ordinary workstation.
+
+The same PattyLog supplies bounded traffic context to scripts, automation, and
+AI agents. PattyView gives human operators a visual surface over that recorded
+model without reconstructing traffic meaning in the browser.
+
+**[Explore the PattyView development preview](cmd/pattyView/README.md)**
+
+![PattyView showing search results, interval lanes, and ranked traffic context](cmd/pattyView/docs/images/pattyView_search_checkout_change.jpg)
+
 **Jump to:** [Run it](#run-it) ·
 [Read the screen](#what-the-screen-is-showing) ·
+[Explore PattyLog with PattyView](cmd/pattyView/README.md) ·
 [Architecture](#the-architecture-behind-the-view) ·
 [Configuration](#configuration-is-a-replayable-command-stream) ·
 [Documentation](#documentation-by-question)
@@ -71,6 +91,14 @@ mkdir -p ./splats
 
 Prebuilt Linux binaries are available from the
 [v0.1.7 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.7).
+
+The [PattyView browser companion](cmd/pattyView/README.md) is currently available
+as a source-built development preview. Its production frontend is committed and
+embedded by the Go launcher, so npm is not required to run it:
+
+```bash
+go run ./cmd/pattyView
+```
 
 Useful built-in references:
 
@@ -176,6 +204,11 @@ PattyLog writes schema-versioned `session_start`, `interval`,
 `control_command`, and `alert` records. It carries matcher state, ranked
 interesting keys, IP groups, selected context, factoids, and alert transitions
 without reproducing the raw log.
+
+[PattyView](cmd/pattyView/README.md) opens that same recorded model as a local,
+read-only browser workspace for interval navigation, search, comparison, and
+retained evidence. It gives human operators a visual surface over the structured
+traffic context available to scripts, automation, and AI agents.
 
 ### Control surface: inline commands
 
@@ -400,6 +433,7 @@ the complete workflow.
 
 ### How do tools consume the same session?
 
+- [PattyView Browser Companion](cmd/pattyView/README.md)
 - [PattyLog Schema Guide](docs/PATTYLOG_SCHEMA.md)
 - [PattyLog Live Shape](docs/JSONL_DIAGRAM.md)
 - [Selection Markup and Context](docs/SELECTION_MARKUP.md)
@@ -423,6 +457,7 @@ for hot-path simplicity and predictable operation.
 | `factoid.go` | Named observations, ticker output, quick help, and panel modes |
 | `inline_command.go` | Shared config and live-control command language |
 | `sidecar.go` | PattyLog schema and JSONL serialization |
+| `cmd/pattyView` | Local browser companion for exploring recorded PattyLog sessions |
 
 The direct dependency surface is intentionally small: `tview`/`tcell`, `tail`,
 and `pflag` are the core external pieces.
