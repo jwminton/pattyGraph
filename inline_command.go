@@ -202,6 +202,10 @@ func validateInlineSettingArgument(name, value string) string {
 		if _, err := strconv.Atoi(value); err != nil {
 			return "grace requires an integer"
 		}
+	case "peak-limit":
+		if _, err := strconv.Atoi(value); err != nil {
+			return "peak-limit requires an integer"
+		}
 	case "flux":
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
@@ -906,6 +910,16 @@ func invokeInlineCommandWithOptions(line string, opts InlineCommandOptions) Inli
 		result := inlineCommandResult(cmd, InlineCommandStatusApplied, "set_flag")
 		result.Result["name"] = strings.ToLower(cmd)
 		result.Result["value"] = value
+		if strings.EqualFold(cmd, "peak-limit") {
+			requested, _ := strconv.Atoi(value)
+			result.Result["value"] = strconv.Itoa(peakWordLimit)
+			if requested != peakWordLimit {
+				result.Result["requested_value"] = requested
+				result.Result["effective_value"] = peakWordLimit
+				result.Result["clamped"] = true
+				result.Result["warning"] = fmt.Sprintf("peak-limit clamped from %d to %d", requested, peakWordLimit)
+			}
+		}
 		if strings.EqualFold(cmd, "json") {
 			result.Result["enabled"] = generateSidecarJSONL
 		} else if strings.EqualFold(cmd, "json-sources") {
@@ -1202,6 +1216,11 @@ func writeConfig(w io.Writer) error {
 			return err
 		}
 	}
+	if peakWordLimit != peakWordLimitDefault {
+		if err := write(InlinePreamble+" peak-limit %d\n", peakWordLimit); err != nil {
+			return err
+		}
+	}
 	if fluxDepth != DefaultFluxDepth {
 		if err := write(InlinePreamble+" flux %d\n", fluxDepth); err != nil {
 			return err
@@ -1328,6 +1347,12 @@ func SetFlagByName(key string, value string) bool {
 			if setGracePeriod(newGrace) {
 				pushFactNow("settings.grace", nil)
 			}
+		}
+		return true
+	case "peak-limit":
+		if requested, err := strconv.Atoi(value); err == nil {
+			effective, changed, clamped := setPeakWordLimit(requested)
+			reportPeakWordLimitUpdate(requested, effective, changed, clamped)
 		}
 		return true
 	case "flux":

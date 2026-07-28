@@ -314,6 +314,18 @@ func NewFactoidGenerator() *FactoidGenerator {
 	g.Add(DirectOnly(func(_ []string) string {
 		return internalFmt("Peak memory reset: starting fresh")
 	}), "model", "peakReset")
+	g.Add(DirectOnly(func(args []string) string {
+		if len(args) != 3 {
+			return ""
+		}
+		return toolFmt(fmt.Sprintf("%s Peak full:+%s; %s", args[0], args[1], args[2]))
+	}), "interesting", "peakContention")
+	g.Add(DirectOnly(func(args []string) string {
+		if len(args) != 2 {
+			return ""
+		}
+		return toolFmt(fmt.Sprintf("%s Peak retired:%s", args[0], args[1]))
+	}), "interesting", "peakRetirement")
 
 	g.Add(Random(1, func(_ []string) string {
 		return fmt.Sprintf(toolFmt("Init(%s):%s/%slines"),
@@ -454,6 +466,15 @@ func NewFactoidGenerator() *FactoidGenerator {
 	g.Add(Random(3, func(_ []string) string {
 		return fmt.Sprintf(toolFmt("Grace:%d"), pattyGracePeriod)
 	}), "settings", "grace")
+	g.Add(Random(3, func(_ []string) string {
+		return fmt.Sprintf(toolFmt("Peak limit:%d"), peakWordLimit)
+	}), "settings", "peak-limit")
+	g.Add(DirectOnly(func(args []string) string {
+		if len(args) != 2 {
+			return ""
+		}
+		return toolFmt(fmt.Sprintf("Peak limit clamped:%s->%s", args[0], args[1]))
+	}), "settings", "peak-limit-clamped")
 	g.Add(Random(3, func(_ []string) string {
 		return fmt.Sprintf(toolFmt("Scale:%.1f"), pattyScaleFactor)
 	}), "settings", "scale")

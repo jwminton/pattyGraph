@@ -258,6 +258,40 @@ func TestSidecarSnapshotPublishesInterestingSourceCatalog(t *testing.T) {
 	}
 }
 
+func TestSidecarInterestingIncludesPeakLifecycleMetadata(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	peakWordLimit = 15
+	m := PattyGraph.wordsMatcher
+	m.peakContentionCount = 7
+	m.peakRetiredCount = 2
+	m.peakRetirementGrace = 15
+
+	snapshot := PattyGraph.SidecarSnapshot(DefaultSidecarOptions())
+	metadata := snapshot.Interesting[0].Metadata
+
+	if got := metadata["peak_limit"]; got != 15 {
+		t.Fatalf("peak_limit = %#v, want 15", got)
+	}
+	if got := metadata["peak_contention_count"]; got != 7 {
+		t.Fatalf("peak_contention_count = %#v, want 7", got)
+	}
+	if got := metadata["peak_contention_guidance"]; got != "lower scale for more selective Peak membership" {
+		t.Fatalf("peak_contention_guidance = %#v", got)
+	}
+	if got := metadata["peak_retired_count"]; got != 2 {
+		t.Fatalf("peak_retired_count = %#v, want 2", got)
+	}
+	if got := metadata["peak_retirement_grace"]; got != 15 {
+		t.Fatalf("peak_retirement_grace = %#v, want 15", got)
+	}
+
+	PattyGraph.ipsMatcher.peakContentionCount = 4
+	ipMetadata := sidecarInterestingSnapshot(PattyGraph.ipsMatcher, DefaultSidecarOptions(), nil).Metadata
+	if got := ipMetadata["peak_contention_guidance"]; got != "review or purge Peak membership" {
+		t.Fatalf("IP peak_contention_guidance = %#v", got)
+	}
+}
+
 func TestSidecarSnapshotOmitsInterestingSourcesWhenDisabled(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	stats := newWordStats()

@@ -38,7 +38,8 @@ var flags = []flagInfo{
 	{"config", "c", "", "Config file", "string"},
 	{"scale", "s", pattyScaleFactor, "Interest Scale factor to be more 'interesting' and trackable. (0.1-4.0)", "float64"},
 	{"push", "p", pattyPushFactor, "Push factor to purge items of interest from 'interesting' columns (0-11)", "int"},
-	{"grace", "g", pattyGracePeriod, "Grace period (in intervals) before entries can qualify for permanent interest.", "int"},
+	{"grace", "g", pattyGracePeriod, "Intervals required for Peak admission and absence-based retirement.", "int"},
+	{"peak-limit", "", peakWordLimit, "Maximum Peak entries retained per interesting column (1-25; outside values clamp)", "int"},
 	{"flux", "f", DefaultFluxDepth, "Flux is the history depth used for interesting word ranking.", "int"},
 	{"read", "r", DefaultMBToRead, "Number of MB back of logfile to read upon startup", "int"},
 	{"color-index", "l", 0, "Advance the color assignment index for a different look", "int"},
@@ -192,7 +193,7 @@ func parseArgs() *MonitorConfig {
 		fmt.Println(usageText())
 
 		categories := map[string][]string{
-			"General Settings": {"push", "scale", "grace", "flux"},
+			"General Settings": {"push", "scale", "grace", "peak-limit", "flux"},
 			//"Customization":    {"title", "color-index", "read", "expert", "zero"},
 			"Configuration": {"config", "save-dir", "json", "json-file", "json-sources", "control", "control-file"},
 			"Customization": {"title", "color-index", "read", "zero"},
@@ -260,6 +261,7 @@ func parseArgs() *MonitorConfig {
 
 	// legacy: globals that were getting set at parse time
 	pattyGracePeriod = *intMap["grace"]
+	_, _, _ = setPeakWordLimit(*intMap["peak-limit"])
 	fluxDepth = *intMap["flux"]
 	pattyPushFactor = *intMap["push"]
 	pattyScaleFactor = *floatMap["scale"]
@@ -317,17 +319,19 @@ Usage: ./pattyGraph [OPTIONS] [file_location]
   If [file_location] is not specified, ./access.log is assumed. Standard web logging 
   formatting (e.g. nginx standard format) is assumed.
 
-  Log data is tracked across a rolling 80-interval window (60 seconds per interval), 
-  allowing trends to emerge over time. Frequent or high-volume entries are 
-  automatically promoted to "Peak" status, visually marked in orange and pinned at 
-  the top of their respective columns. Peak entries do not expire naturally and must 
-  be explicitly purged (e.g. via ctrl-p or the !!! purge inline command).
+  Log data is tracked across a rolling 80-interval window (60 seconds per interval),
+  allowing trends to emerge over time. Frequent or high-volume entries are
+  automatically promoted to "Peak" status, visually marked in orange and pinned at
+  the top of their respective columns. Each column retains a bounded Peak set. A Peak
+  that receives no hits for grace consecutive intervals retires naturally; ctrl-p or
+  the !!! purge inline command remains available for an explicit reset.
 
-  The three core tuning controls — push, scale, and grace — shape what qualifies as 
-  "Interesting". push sets the time pressure on entries, accelerating how quickly 
-  idle data is aged out. scale amplifies or dampens the perceived importance of 
-  tokens based on observed frequency. grace defines how long an entry must survive 
-  before it becomes eligible for Peak status.
+  The core tuning controls — push, scale, grace, and peak-limit — shape what qualifies as
+  "Interesting". push sets the time pressure on entries, accelerating how quickly
+  idle data is aged out. scale amplifies or dampens the perceived importance of
+  tokens based on observed frequency. grace defines how long an entry must survive
+  before it becomes eligible for Peak status and how long an absent Peak remains.
+  peak-limit bounds retained Peak membership independently for Words, Refs, and IPs.
 
   PattyGraph uses the notion of 'primeFlux' — the sum of the current interval
   and the most recent N historical values (nFlux). InterestingWords are ranked and
@@ -533,6 +537,8 @@ Configuration Settings:
   !!! push <int>
   !!! grace <int>
   !!! scale <float>
+  !!! peak-limit <int>
+      Set Peak capacity per Words/Refs/IPs column (1-25, default 20; outside values clamp).
   !!! title <name>
   !!! save-dir <path>
       Set the directory for config and splat output (e.g. ~/splats).

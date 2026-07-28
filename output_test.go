@@ -96,6 +96,37 @@ func TestWriteConfigPreservesDefaultOutputEnablement(t *testing.T) {
 	}
 }
 
+func TestWriteConfigPreservesNonDefaultPeakLimit(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+	peakWordLimit = 15
+
+	var buf bytes.Buffer
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig() error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "!!! peak-limit 15\n") {
+		t.Fatalf("config did not preserve peak-limit:\n%s", buf.String())
+	}
+
+	peakWordLimit = peakWordLimitDefault
+	buf.Reset()
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig(default) error = %v", err)
+	}
+	if strings.Contains(buf.String(), "!!! peak-limit") {
+		t.Fatalf("config emitted default peak-limit:\n%s", buf.String())
+	}
+
+	_, _, _ = setPeakWordLimit(30)
+	buf.Reset()
+	if err := writeConfig(&buf); err != nil {
+		t.Fatalf("writeConfig(clamped) error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "!!! peak-limit 25\n") || strings.Contains(buf.String(), "!!! peak-limit 30\n") {
+		t.Fatalf("config did not preserve effective clamped peak-limit:\n%s", buf.String())
+	}
+}
+
 func TestWriteConfigPreservesJSONSourcesIndependently(t *testing.T) {
 	setupMonitorPipelineTestGraph()
 	includeSidecarSourceExamples = true

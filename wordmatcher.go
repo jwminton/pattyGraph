@@ -29,12 +29,21 @@ import (
 // retained signal quality, and display behavior. When changing it, identify
 // which concern owns the change before trying to detangle the whole type.
 type InterestingWordMatcher struct {
-	mName             string
-	timeToLive        int
-	pushIntervalCount int             // Completed pushes represented by this stream, capped at history depth when displayed.
-	peakWords         []string        // Ordered list of words that made it above threshold
-	peakWordsSet      map[string]bool // Helper map to ensure unique entries in peakWords
-	wordFrequency     map[string]*WordStats
+	mName              string
+	timeToLive         int
+	pushIntervalCount  int             // Completed pushes represented by this stream, capped at history depth when displayed.
+	peakWords          []string        // Ordered list of words that made it above threshold
+	peakWordsSet       map[string]bool // Helper map to ensure unique entries in peakWords
+	peakEmptyIntervals map[string]int  // Consecutive completed intervals without a hit, bounded by peakWordLimit.
+	wordFrequency      map[string]*WordStats
+
+	// Latest push-boundary Peak maintenance, retained for the next PattyLog
+	// interval snapshot. Contention notifications are edge-triggered so a poor
+	// scale setting cannot flood the ticker on every interval.
+	peakContentionCount  int
+	peakContentionActive bool
+	peakRetiredCount     int
+	peakRetirementGrace  int
 
 	// printed keys eligible for selection
 	currentListing []string
@@ -67,6 +76,21 @@ type InterestingWordMatcher struct {
 
 var commonWords map[string]bool // Filters known high-frequency tokens from interesting word streams.
 
+// Peak is bounded operational memory, not another continuously replaced top-N
+// list. The runtime limit stays within PattyLog's maximum emitted entry count.
+const (
+	peakWordLimitDefault = 20
+	peakWordLimitMin     = 1
+	peakWordLimitMax     = 25
+)
+
+var peakWordLimit = peakWordLimitDefault
+
+type peakWordCandidate struct {
+	word     string
+	strength float64
+}
+
 // NewInterestingWordMatcher initializes a stream with its parser, retention
 // window, ranking trackers, and display scratch space.
 func NewInterestingWordMatcher(matcherName string, slidingWindowDuration int) *InterestingWordMatcher {
@@ -77,11 +101,15 @@ func NewInterestingWordMatcher(matcherName string, slidingWindowDuration int) *I
 		mName:         matcherName,
 		wordFrequency: make(map[string]*WordStats, 4096),
 
-		peakWordsSet:          make(map[string]bool, 25),
-		timeToLive:            slidingWindowDuration,
-		displayWidth:          26,
-		titleFormat:           fmt.Sprintf("%%-%ds", botsDisplayWidth-19),
-		topTracker:            NewTopWordTracker(InterestingWordListSize + 25),
+		peakWords:          make([]string, 0, peakWordLimit),
+		peakWordsSet:       make(map[string]bool, peakWordLimit),
+		peakEmptyIntervals: make(map[string]int, peakWordLimit),
+		timeToLive:         slidingWindowDuration,
+		displayWidth:       26,
+		titleFormat:        fmt.Sprintf("%%-%ds", botsDisplayWidth-19),
+		// Config replay can raise peak-limit after matcher construction. Retain
+		// maximum candidate capacity so Peak filtering cannot crowd out normal rows.
+		topTracker:            NewTopWordTracker(InterestingWordListSize + peakWordLimitMax),
 		lruTracker:            NewScoredLRUTracker(InterestingWordListSize + 50),
 		printedEntriesScratch: make([]string, InterestingWordListSize+50),
 	}
@@ -412,59 +440,210 @@ func (m *InterestingWordMatcher) match() bool {
 func (m *InterestingWordMatcher) push() {
 	m.pushIntervalCount++
 	m.selectedGraphCache = ""
+	m.peakContentionCount = 0
+	m.peakRetiredCount = 0
+	m.peakRetirementGrace = 0
 	// invariants
 	nDenom := m.normalizedDenominator()
 	limit := logicalCycles - m.timeToLive
+	candidates := make([]peakWordCandidate, 0, peakWordLimit)
+	retired := make(map[string]bool)
 	for word, stats := range m.wordFrequency {
+		oldCount := stats.count
 		// Remove entries outside the sliding window to keep data fresh
 		// but make push wait just a little longer so we're not stepping on match timing/pruning
 		//if logicalCycles-stats.lastSeenTic > timeToLive {
 		if stats.lastSeenTic < limit {
-			if !m.peakWordsSet[word] {
-				// This delete and m.ipScratch.Remove MUST be kept in sync.
-				delete(m.wordFrequency, word)
-				if m.ipScratch != nil {
-					//delete stats.source.ipPrefix -> word
-					m.ipScratch.Remove(stats.source.ip, stats.source.ipPrefix)
+			if m.peakWordsSet[word] {
+				// Peak history continues across ordinary staleness so absence is
+				// visible and can eventually retire the protected entry.
+				stats.push()
+				if m.recordPeakInterval(word, oldCount) {
+					retired[word] = true
+					m.removeWordStats(word, stats)
 				}
-				recycleWordStats(stats)
+			} else {
+				m.removeWordStats(word, stats)
 			}
-			m.lruTracker.Delete(word)
 			continue
 		}
-		oldCount := stats.count
 		stats.push()
+		if m.peakWordsSet[word] {
+			if m.recordPeakInterval(word, oldCount) {
+				retired[word] = true
+				m.removeWordStats(word, stats)
+			}
+			continue
+		}
 
-		/** MOVE TO PEAK DECISION
-		 */
-		// Tried to pull it all out for simplicity in identifying what's going on
-		// don't make any Peak decisions unless we've completed pattyGracePeriod cycles
+		// Don't make any Peak decisions unless we've completed enough history.
 		if m.pushIntervalCount >= pattyGracePeriod {
-			if !m.peakWordsSet[word] {
-				stat := m.wordFrequency[word]
-				if stat.historyLength() >= pattyGracePeriod {
-					if m.mName == "ips" {
-						sBurst := stats.burstiness() // should match what is used in secondaryMetric display
-						//if (oldCount > 10 && sBurst >= 1.0) || oldCount > (lastLinesMax+lastLastLinesMax)/20 {
-						if (oldCount > 10 && sBurst >= 1.0) || float64(oldCount) > (lastLinesBuf.nFluxAvg(fluxDepth)/10) {
-							// combine with below when isPeak is redone
-							m.peakWords = append(m.peakWords, word)
-							m.peakWordsSet[word] = true
-							//stat.isPeak = true
-						}
-					} else {
-						if stat.normalized()/nDenom >= 1.0 {
-							m.peakWords = append(m.peakWords, word)
-							m.peakWordsSet[word] = true
-							//stat.isPeak = true
-						}
-					}
+			if stats.historyLength() >= pattyGracePeriod {
+				if strength, eligible := m.peakEligibility(stats, oldCount, nDenom); eligible {
+					candidates = append(candidates, peakWordCandidate{word: word, strength: strength})
 				}
 			}
 		}
 	}
+	m.finishPeakRetirements(retired)
+	m.admitPeakCandidates(candidates)
 	m.updatePeakWordStats()
 	m.wordStatsCreated = 0
+}
+
+func (m *InterestingWordMatcher) removeWordStats(word string, stats *WordStats) {
+	// This delete and m.ipScratch.Remove MUST be kept in sync.
+	delete(m.wordFrequency, word)
+	if m.ipScratch != nil {
+		m.ipScratch.Remove(stats.source.ip, stats.source.ipPrefix)
+	}
+	m.lruTracker.Delete(word)
+	recycleWordStats(stats)
+}
+
+func (m *InterestingWordMatcher) peakEligibility(stats *WordStats, intervalCount int, normalizedDenominator float64) (float64, bool) {
+	if m.mName == "ips" {
+		burst := stats.burstiness()
+		eligible := (intervalCount > 10 && burst >= 1.0) ||
+			float64(intervalCount) > (lastLinesBuf.nFluxAvg(fluxDepth)/10)
+		return float64(intervalCount), eligible
+	}
+
+	strength := stats.normalized() / normalizedDenominator
+	return strength, strength >= 1.0
+}
+
+func (m *InterestingWordMatcher) recordPeakInterval(word string, intervalCount int) bool {
+	if intervalCount > 0 {
+		m.peakEmptyIntervals[word] = 0
+		return false
+	}
+
+	empty := m.peakEmptyIntervals[word] + 1
+	m.peakEmptyIntervals[word] = empty
+	if empty < pattyGracePeriod {
+		return false
+	}
+
+	delete(m.peakWordsSet, word)
+	delete(m.peakEmptyIntervals, word)
+	return true
+}
+
+func (m *InterestingWordMatcher) finishPeakRetirements(retired map[string]bool) {
+	if len(retired) == 0 {
+		return
+	}
+
+	kept := m.peakWords[:0]
+	for _, word := range m.peakWords {
+		if !retired[word] {
+			kept = append(kept, word)
+		}
+	}
+	m.peakWords = kept
+	m.peakRetiredCount = len(retired)
+	m.peakRetirementGrace = pattyGracePeriod
+	if !doRandomFact {
+		return
+	}
+	_, _ = pushFactSnapshotNow("interesting.peakRetirement", []string{
+		peakStreamLabel(m.mName),
+		fmt.Sprintf("%d", len(retired)),
+	})
+}
+
+func (m *InterestingWordMatcher) admitPeakCandidates(candidates []peakWordCandidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].strength == candidates[j].strength {
+			return candidates[i].word < candidates[j].word
+		}
+		return candidates[i].strength > candidates[j].strength
+	})
+
+	available := peakWordLimit - len(m.peakWords)
+	if available < 0 {
+		available = 0
+	}
+	admitted := min(available, len(candidates))
+	for _, candidate := range candidates[:admitted] {
+		m.peakWords = append(m.peakWords, candidate.word)
+		m.peakWordsSet[candidate.word] = true
+		m.peakEmptyIntervals[candidate.word] = 0
+	}
+
+	m.updatePeakContention(len(candidates) - admitted)
+}
+
+func (m *InterestingWordMatcher) updatePeakContention(count int) {
+	m.peakContentionCount = count
+	if count == 0 {
+		m.peakContentionActive = false
+		return
+	}
+	if m.peakContentionActive {
+		return
+	}
+	if !doRandomFact {
+		return
+	}
+
+	m.peakContentionActive = true
+	_, _ = pushFactSnapshotNow("interesting.peakContention", []string{
+		peakStreamLabel(m.mName),
+		fmt.Sprintf("%d", count),
+		m.peakContentionTickerGuidance(),
+	})
+}
+
+func peakStreamLabel(name string) string {
+	switch name {
+	case "ips":
+		return "IPs"
+	case "refs":
+		return "Refs"
+	default:
+		return "Words"
+	}
+}
+
+func (m *InterestingWordMatcher) peakContentionTickerGuidance() string {
+	if m.mName == "ips" {
+		return "review/purge"
+	}
+	return "lower scale"
+}
+
+func (m *InterestingWordMatcher) peakContentionGuidance() string {
+	if m.mName == "ips" {
+		return "review or purge Peak membership"
+	}
+	return "lower scale for more selective Peak membership"
+}
+
+func setPeakWordLimit(requested int) (effective int, changed bool, clamped bool) {
+	effective = requested
+	if effective < peakWordLimitMin {
+		effective = peakWordLimitMin
+	} else if effective > peakWordLimitMax {
+		effective = peakWordLimitMax
+	}
+	clamped = effective != requested
+	changed = effective != peakWordLimit
+	peakWordLimit = effective
+	return effective, changed, clamped
+}
+
+func reportPeakWordLimitUpdate(requested int, effective int, changed bool, clamped bool) {
+	if clamped {
+		_, _ = pushFactSnapshotNow("settings.peak-limit-clamped", []string{
+			fmt.Sprintf("%d", requested),
+			fmt.Sprintf("%d", effective),
+		})
+	}
+	if changed {
+		pushFactNow("settings.peak-limit", nil)
+	}
 }
 
 // Cache callers should compute this once per display cycle, not once per entry.
@@ -1321,7 +1500,12 @@ func (m *InterestingWordMatcher) migrateIps() {
 // purgePeakWords If isPeak gets used, this will be more work than dropping the data
 func (m *InterestingWordMatcher) purgePeakWords() {
 	m.peakWords = []string{}
-	m.peakWordsSet = make(map[string]bool)
+	m.peakWordsSet = make(map[string]bool, peakWordLimit)
+	m.peakEmptyIntervals = make(map[string]int, peakWordLimit)
+	m.peakContentionCount = 0
+	m.peakContentionActive = false
+	m.peakRetiredCount = 0
+	m.peakRetirementGrace = 0
 }
 
 //	func (m *InterestingWordMatcher) purgeHistory() {

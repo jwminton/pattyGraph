@@ -590,7 +590,16 @@ func sidecarInterestingSnapshot(m *InterestingWordMatcher, opts SidecarOptions, 
 			"word_stats_created":  m.wordStatsCreated,
 			"selected_key":        m.selectedKey,
 			"display_width":       m.displayWidth,
+			"peak_limit":          peakWordLimit,
 		},
+	}
+	if m.peakContentionCount > 0 {
+		out.Metadata["peak_contention_count"] = m.peakContentionCount
+		out.Metadata["peak_contention_guidance"] = m.peakContentionGuidance()
+	}
+	if m.peakRetiredCount > 0 {
+		out.Metadata["peak_retired_count"] = m.peakRetiredCount
+		out.Metadata["peak_retirement_grace"] = m.peakRetirementGrace
 	}
 	if m.mName == "ips" && m.ipScratch != nil {
 		out.IPGroups = sidecarIPGroupEntries(m, opts.TopLimit, opts, sources)

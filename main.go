@@ -159,6 +159,10 @@ func enforceCliFlags() {
 				pattyGracePeriod = value
 				pushFactNow("settings.grace", nil)
 			}
+		case "peak-limit":
+			requested, _ := strconv.Atoi(f.Value.String())
+			effective, changed, clamped := setPeakWordLimit(requested)
+			reportPeakWordLimitUpdate(requested, effective, changed, clamped)
 		case "flux":
 			value, _ := strconv.Atoi(f.Value.String())
 			if value != fluxDepth {

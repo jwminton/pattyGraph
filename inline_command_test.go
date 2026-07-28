@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -946,6 +947,7 @@ func TestInlineSettingsRejectInvalidArguments(t *testing.T) {
 		{"!!! push -1", "push", "-1", "push must be between 0 and 11"},
 		{"!!! push 12", "push", "12", "push must be between 0 and 11"},
 		{"!!! grace nope", "grace", "nope", "grace requires an integer"},
+		{"!!! peak-limit nope", "peak-limit", "nope", "peak-limit requires an integer"},
 		{"!!! flux nope", "flux", "nope", "flux requires an integer"},
 		{"!!! flux 99", "flux", "99", "flux must be between 1 and 10"},
 		{"!!! scale nope", "scale", "nope", "scale requires a number"},
@@ -971,10 +973,80 @@ func TestInlineSettingsRejectInvalidArguments(t *testing.T) {
 	if pattyPushFactor != pattyPushFactorDefault ||
 		pattyGracePeriod != pattyGracePeriodDefault ||
 		pattyScaleFactor != pattyScaleFactorDefault ||
+		peakWordLimit != peakWordLimitDefault ||
 		fluxDepth != DefaultFluxDepth ||
 		colorIndex != 0 ||
 		PattyGraph.pattyConfig.mbToRead != DefaultMBToRead {
 		t.Fatal("invalid setting argument changed runtime state")
+	}
+}
+
+func TestInlinePeakLimitClampsBounds(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		requested int
+		effective int
+	}{
+		{"below", 0, peakWordLimitMin},
+		{"negative", -5, peakWordLimitMin},
+		{"above", 30, peakWordLimitMax},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setupMonitorPipelineTestGraph()
+			initialFacts := len(facts.forced)
+
+			result := invokeInlineCommand(fmt.Sprintf("!!! peak-limit %d", test.requested))
+
+			if result.Status != InlineCommandStatusApplied {
+				t.Fatalf("status = %q, want applied: %#v", result.Status, result.Result)
+			}
+			if peakWordLimit != test.effective {
+				t.Fatalf("peakWordLimit = %d, want %d", peakWordLimit, test.effective)
+			}
+			if result.Result["requested_value"] != test.requested || result.Result["effective_value"] != test.effective {
+				t.Fatalf("requested/effective = %#v/%#v, want %d/%d", result.Result["requested_value"], result.Result["effective_value"], test.requested, test.effective)
+			}
+			if result.Result["value"] != strconv.Itoa(test.effective) || result.Result["clamped"] != true {
+				t.Fatalf("clamped result = %#v", result.Result)
+			}
+			wantWarning := fmt.Sprintf("peak-limit clamped from %d to %d", test.requested, test.effective)
+			if result.Result["warning"] != wantWarning {
+				t.Fatalf("warning = %#v, want %q", result.Result["warning"], wantWarning)
+			}
+
+			foundWarning := false
+			for _, fact := range facts.forced[initialFacts:] {
+				if fact.Name != "settings.peak-limit-clamped" {
+					continue
+				}
+				foundWarning = true
+				wantText := fmt.Sprintf("Peak limit clamped:%d->%d", test.requested, test.effective)
+				if text := stripBrackets(fact.Generate(nil)); !strings.Contains(text, wantText) {
+					t.Fatalf("clamp fact = %q, want %q", text, wantText)
+				}
+			}
+			if !foundWarning {
+				t.Fatal("clamped setting did not queue named warning fact")
+			}
+		})
+	}
+}
+
+func TestInlinePeakLimitAcceptsInRangeValue(t *testing.T) {
+	setupMonitorPipelineTestGraph()
+
+	result := invokeInlineCommand("!!! peak-limit 15")
+
+	if result.Status != InlineCommandStatusApplied || peakWordLimit != 15 {
+		t.Fatalf("result/limit = %#v/%d, want applied/15", result, peakWordLimit)
+	}
+	if result.Result["value"] != "15" {
+		t.Fatalf("value = %#v, want 15", result.Result["value"])
+	}
+	for _, key := range []string{"requested_value", "effective_value", "clamped", "warning"} {
+		if _, exists := result.Result[key]; exists {
+			t.Fatalf("in-range result unexpectedly included %q: %#v", key, result.Result)
+		}
 	}
 }
 

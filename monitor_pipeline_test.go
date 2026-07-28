@@ -31,6 +31,7 @@ func resetRuntimeGlobalsForTest() {
 	pattyPushFactor = pattyPushFactorDefault
 	pattyGracePeriod = pattyGracePeriodDefault
 	pattyScaleFactor = pattyScaleFactorDefault
+	peakWordLimit = peakWordLimitDefault
 	fluxDepth = DefaultFluxDepth
 	colorIndex = 0
 	machineDisplayName = ""
@@ -101,6 +102,7 @@ func TestSetupMonitorPipelineTestGraphResetsRuntimeGlobals(t *testing.T) {
 	pattyPushFactor = 11
 	pattyGracePeriod = 70
 	pattyScaleFactor = 4.0
+	peakWordLimit = 25
 	fluxDepth = 9
 	colorIndex = 5
 	generateSidecarJSONL = true
@@ -121,6 +123,7 @@ func TestSetupMonitorPipelineTestGraphResetsRuntimeGlobals(t *testing.T) {
 	if pattyPushFactor != pattyPushFactorDefault ||
 		pattyGracePeriod != pattyGracePeriodDefault ||
 		pattyScaleFactor != pattyScaleFactorDefault ||
+		peakWordLimit != peakWordLimitDefault ||
 		fluxDepth != DefaultFluxDepth ||
 		colorIndex != 0 {
 		t.Fatal("setup did not restore default settings")
