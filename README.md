@@ -90,10 +90,10 @@ mkdir -p ./splats
 ```
 
 Prebuilt Linux binaries are available from the
-[v0.1.7 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.7).
+[v0.1.8 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.8).
 
-The [PattyView browser companion](cmd/pattyView/README.md) is currently available
-as a source-built development preview. Its production frontend is committed and
+The [PattyView browser companion](cmd/pattyView/README.md) is available from
+source and in the prebuilt release. Its production frontend is committed and
 embedded by the Go launcher, so npm is not required to run it:
 
 ```bash
