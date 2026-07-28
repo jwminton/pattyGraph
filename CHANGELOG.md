@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.8
+
+Adds PattyView as the browser companion for exploring recorded PattyLog sessions
+and completes PattyGraph's longer-lived Peak lifecycle.
+
+- Added the embedded PattyView application for interval navigation, traffic
+  exploration, search, comparison, alerts, factoids, and Change attribution.
+- Scaled PattyView loading and interaction across large PattyLog files while
+  retaining its local, read-only data model.
+- Added optional retained source evidence and best-effort source lookup guidance
+  for selected words, referrers, and IPs.
+- Made PattyLog records consistently log-time aware for replay and forensic use.
+- Added the Change matcher and aligned its interval calculation with PattyView.
+- Bounded Peak membership with deterministic admission, contention feedback,
+  and retirement after `grace` consecutive empty intervals.
+- Added configurable `peak-limit` capacity with clamped bounds, generated-config
+  support, factoid feedback, and PattyLog metadata.
+
 ## 0.1.7
 
 Strengthens PattyGraph's live control surfaces, retained metrics, and default
