@@ -192,6 +192,7 @@ function IntervalOverview({
   const summary = readObject(data, 'summary')
   const runtime = {
     ...(readObject(data, 'runtime') ?? {}),
+    viewer: `pattyView ${__PATTY_VIEW_VERSION__}`,
     schema_version: readNumber(data, 'schema_version'),
   }
   const matchers = readArray(data, 'matchers')

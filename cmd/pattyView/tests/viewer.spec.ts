@@ -4,6 +4,7 @@ import { fixture } from './testSupport'
 test('opens and navigates a PattyLog snapshot', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Open a PattyLog' })).toBeVisible()
+  await expect(page.locator('.viewer-version')).toHaveText('pattyView 0.1.8')
 
   await page.locator('input[type="file"]').setInputFiles(fixture)
 
@@ -11,6 +12,8 @@ test('opens and navigates a PattyLog snapshot', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Jul 18, 08:02 AM' })).toBeVisible()
   await expect(page.locator('.detail-heading p')).toHaveText('line 7 · interval 1')
   const runtimeSection = page.locator('.overview-section').filter({ has: page.getByRole('heading', { name: 'Runtime' }) })
+  await expect(runtimeSection).toContainText('Viewer')
+  await expect(runtimeSection).toContainText('pattyView 0.1.8')
   await expect(runtimeSection).toContainText('Schema version')
   await expect(runtimeSection).toContainText('4')
   await expect(page.getByText('1 malformed line preserved as diagnostics')).toBeVisible()

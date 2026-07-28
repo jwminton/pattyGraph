@@ -89,11 +89,13 @@ go build -o pattyView ./cmd/pattyView
 ./pattyView
 ```
 
-PattyView binds to loopback by default. Use `--listen` to select another address
-or port:
+PattyView prints its version and listening address at startup. Use `--listen` or
+`-l` to select another address or port:
 
 ```bash
 ./pattyView --listen 127.0.0.1:4180
+./pattyView -l 127.0.0.1:4180
+./pattyView --version
 ```
 
 Keep the listener on loopback for local investigations unless remote access is

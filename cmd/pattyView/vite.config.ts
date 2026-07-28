@@ -1,8 +1,16 @@
 import preact from '@preact/preset-vite'
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vitest/config'
+
+const packageInfo = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+) as { version: string }
 
 export default defineConfig({
   plugins: [preact()],
+  define: {
+    __PATTY_VIEW_VERSION__: JSON.stringify(packageInfo.version),
+  },
   build: {
     rolldownOptions: {
       output: {

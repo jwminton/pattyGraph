@@ -45,13 +45,14 @@ The core controls are:
 push   higher value means stronger aging pressure and shorter purge windows
 scale  higher value makes repeated words and refs become Peak more readily
 grace  higher value requires more intervals before Peak eligibility
+peak-limit  maximum Peak members per interesting column, default 20
 flux   higher value ranks entries with a deeper recency bias
 ```
 
 The related display markers are:
 
 ```text
-Peak   pinned survivor that remains until purged
+Peak   bounded survivor protected from ordinary time pressure while active
 +      entry has full retained history for the session or 80-interval window
 ```
 
@@ -181,12 +182,27 @@ makes the Peak threshold harder to reach.
 Scale changes promotion pressure. Repeated activity crosses into Peak more
 readily at higher scale and stays more selective at lower scale.
 
+Operationally, `scale` is the control for shaping steady-state ranking. A useful
+calibration is to look at the top handful of entries that you already expect the
+site to produce: persistent bots, health checks, common content paths, normal
+referers, or other recurring background traffic. Set `scale` so those known,
+expected entries show a PattyFactor just over `1` in the default secondary view.
+
+Entries over `1` are strong enough to be candidates for Peak, but `grace` still
+decides when they can be promoted. With `grace` around `20` to `30`, this lets
+the top five to ten expected steady-state entries become durable landmarks while
+shorter bursts still have to survive time pressure before they earn a Peak slot.
+
+In that sense, `scale` sets the baseline shape of the interesting columns. It is
+less about making everything more sensitive and more about deciding where normal,
+recognizable site activity should sit relative to the Peak threshold.
+
 ## Grace
 
 `--grace` controls how long an entry must survive before it can become Peak.
 
-An entry can be noisy in one interval and still disappear. Grace prevents that
-single burst from becoming permanent too quickly. PattyGraph waits until enough
+An entry can be noisy in one interval and still disappear. Grace keeps that
+single burst from becoming Peak too quickly. PattyGraph waits until enough
 intervals have passed and the entry has enough retained history before it can
 qualify for Peak.
 
@@ -199,7 +215,8 @@ survives grace  eligible for Peak
 ```
 
 The default retained history depth is `80` intervals. Grace is the gate before
-an entry can be promoted into the persistent Peak area.
+an entry can be promoted into the protected Peak area. It also sets the number
+of consecutive empty intervals required to retire an inactive Peak.
 
 ## Peak Entries
 
@@ -216,6 +233,10 @@ Peak means:
 this key has survived long enough and scored strongly enough to deserve a stable slot
 ```
 
+Each interesting column has a bounded number of Peak slots. `--peak-limit`
+defaults to `20` and accepts an effective range of `1` to `25`. Existing members
+keep their slots when the limit is lowered; new admission waits for capacity.
+
 That stable slot is useful for ordinary site shape as well as threat shape.
 
 For `words`, Peak often identifies important parts of the site. If a site is
@@ -231,8 +252,13 @@ it can be a source that keeps returning through reuse, rotation, or sustained
 watching. The value is that it remains visible long enough to compare against
 matchers, prefix groups, errors, bytes, and User-Agent movement.
 
-Peak entries remain pinned until an explicit purge action clears them, such as
-the keyboard purge command or the inline command:
+Peak entries remain protected from ordinary time pressure while they are active.
+Every completed interval contributes a history value, including zero when a
+Peak receives no hits. A hit resets that empty run. `grace` consecutive empty
+intervals retire the Peak and recycle its retained state.
+
+An explicit purge remains available when the operator wants a fresh Peak set,
+using the keyboard purge command or the inline command:
 
 ```text
 !!! purge
@@ -378,6 +404,10 @@ the columns harder to read.
 More scale can help repeated entries become Peak sooner. Less scale keeps Peak
 more selective.
 
+For steady monitoring, a practical target is to set scale so the expected top
+few recurring entries sit just above `1` PattyFactor, then let grace determine
+which of them are persistent enough to become Peak.
+
 More grace makes PattyGraph require longer survival before promotion. Less
 grace lets persistent entries become Peak earlier.
 
@@ -403,5 +433,6 @@ space.
 Time pressure is the aging system behind the interesting columns. `push`
 controls how quickly idle entries are purged. `scale` changes how strongly
 repeated activity contributes to Peak promotion. `grace` controls how long an
-entry must survive before Peak is possible. Peak entries stay pinned until
-purged, and a leading `+` means the entry has full retained history.
+entry must survive before Peak is possible and how many empty intervals retire
+an inactive Peak. `peak-limit` bounds Peak membership per interesting column,
+and a leading `+` means the entry has full retained history.

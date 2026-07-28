@@ -9,7 +9,7 @@ test('uses a synthetic search lane to locate emitted traffic and factoid records
       session_id: 'search-lane',
       timestamp: '1970-01-01T00:00:00Z',
       log_time: '1970-01-01T00:00:00Z',
-      version: '0.1.8-dev',
+      version: '0.1.8',
     },
     {
       schema_version: 4,
@@ -135,4 +135,3 @@ test('uses a synthetic search lane to locate emitted traffic and factoid records
   await expect(page.locator('.search-lane-label')).toHaveCount(0)
   await expect(page.locator('.interval-map-search')).toHaveCount(0)
 })
-

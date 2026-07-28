@@ -15,11 +15,15 @@ import (
 
 const defaultListenAddress = "127.0.0.1:4177"
 
+// PattyViewVersion is checked against pattyGraph and package.json by compile.sh.
+const PattyViewVersion = "0.1.8"
+
 //go:embed dist
 var embeddedDist embed.FS
 
 type serverOptions struct {
 	listenAddress string
+	showVersion   bool
 }
 
 func main() {
@@ -36,6 +40,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if options.showVersion {
+		fmt.Fprintf(stdout, "pattyView %s\n", PattyViewVersion)
+		return nil
+	}
 
 	handler, err := embeddedHandler()
 	if err != nil {
@@ -48,7 +56,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	defer listener.Close()
 
-	fmt.Fprintf(stdout, "PattyView available at http://%s/\n", listener.Addr())
+	fmt.Fprintf(stdout, "pattyView %s available at http://%s/\n", PattyViewVersion, listener.Addr())
 	server := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -62,14 +70,28 @@ func run(args []string, stdout, stderr io.Writer) error {
 func parseServerOptions(args []string, stderr io.Writer) (serverOptions, error) {
 	flags := flag.NewFlagSet("pattyView", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	listenAddress := flags.String("listen", defaultListenAddress, "HTTP listen address")
+	flags.Usage = func() {
+		fmt.Fprintln(stderr, "Usage: pattyView [options]")
+		fmt.Fprintln(stderr, "  -l, --listen address")
+		fmt.Fprintf(stderr, "      HTTP listen address (default %q)\n", defaultListenAddress)
+		fmt.Fprintln(stderr, "  -v, --version")
+		fmt.Fprintln(stderr, "      print version and exit")
+		fmt.Fprintln(stderr, "  -h, --help")
+		fmt.Fprintln(stderr, "      show this help")
+	}
+	listenAddress := defaultListenAddress
+	showVersion := false
+	flags.StringVar(&listenAddress, "listen", defaultListenAddress, "HTTP listen address")
+	flags.StringVar(&listenAddress, "l", defaultListenAddress, "HTTP listen address (shorthand)")
+	flags.BoolVar(&showVersion, "version", false, "print version and exit")
+	flags.BoolVar(&showVersion, "v", false, "print version and exit (shorthand)")
 	if err := flags.Parse(args); err != nil {
 		return serverOptions{}, err
 	}
 	if flags.NArg() != 0 {
 		return serverOptions{}, fmt.Errorf("unexpected positional argument %q", flags.Arg(0))
 	}
-	return serverOptions{listenAddress: *listenAddress}, nil
+	return serverOptions{listenAddress: listenAddress, showVersion: showVersion}, nil
 }
 
 func embeddedHandler() (http.Handler, error) {

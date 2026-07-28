@@ -50,6 +50,7 @@ export function EmptyState({
         ) : null}
       </div>
       <span class="drop-hint">or drop a .jsonl snapshot here</span>
+      <span class="viewer-version">pattyView {__PATTY_VIEW_VERSION__}</span>
     </main>
   )
 }
@@ -90,4 +91,3 @@ export function IssueBanner({ issues }: { issues: Array<{ lineNumber: number; me
     </details>
   )
 }
-

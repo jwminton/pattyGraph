@@ -260,7 +260,7 @@ test('shows every alert transition attached to an interval', async ({ page }) =>
       event_type: 'session_start',
       session_id: 'alert-timeline',
       timestamp: '2026-07-18T10:00:00-07:00',
-      version: '0.1.8-dev',
+      version: '0.1.8',
     },
     {
       schema_version: 4,

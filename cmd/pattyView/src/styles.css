@@ -336,6 +336,13 @@ summary:focus-visible {
   font-size: 12px;
 }
 
+.viewer-version {
+  margin-top: 8px;
+  color: #626b64;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
 .loading-state {
   gap: 10px;
 }

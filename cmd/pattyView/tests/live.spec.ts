@@ -7,7 +7,7 @@ test('follows appends, preserves older selection, and resets on replacement', as
     event_type: 'session_start',
     session_id: 'live-a',
     timestamp: '2026-07-18T09:00:00-07:00',
-    version: '0.1.8-dev',
+    version: '0.1.8',
   })
   const interval0 = JSON.stringify({
     schema_version: 4,
@@ -49,7 +49,7 @@ test('follows appends, preserves older selection, and resets on replacement', as
   await expect(page.getByRole('heading', { name: 'Jul 18, 09:01 AM' })).toBeVisible()
 
   await page.getByRole('button', { name: /Session start/ }).click()
-  await expect(page.getByRole('heading', { name: '0.1.8-dev' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '0.1.8' })).toBeVisible()
 
   const interval1 = JSON.stringify({
     schema_version: 4,
@@ -72,7 +72,7 @@ test('follows appends, preserves older selection, and resets on replacement', as
   }, interval1)
 
   await expect(page.getByText('3 records')).toBeVisible({ timeout: 4000 })
-  await expect(page.getByRole('heading', { name: '0.1.8-dev' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '0.1.8' })).toBeVisible()
   await page.getByRole('button', { name: 'Resume live' }).click()
   await expect(page.getByRole('heading', { name: 'Jul 18, 09:02 AM' })).toBeVisible()
 
@@ -107,4 +107,3 @@ test('follows appends, preserves older selection, and resets on replacement', as
   await expect(page.getByRole('heading', { name: 'Jul 18, 10:01 AM' })).toBeVisible()
   await expect(page.getByText('12', { exact: true }).first()).toBeVisible()
 })
-

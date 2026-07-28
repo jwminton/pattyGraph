@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"flag"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,6 +27,49 @@ func TestParseServerOptions(t *testing.T) {
 	}
 	if options.listenAddress != "127.0.0.1:0" {
 		t.Fatalf("custom listen address = %q", options.listenAddress)
+	}
+
+	options, err = parseServerOptions([]string{"-l", "127.0.0.1:4180"}, &stderr)
+	if err != nil {
+		t.Fatalf("parse shorthand listen option: %v", err)
+	}
+	if options.listenAddress != "127.0.0.1:4180" {
+		t.Fatalf("shorthand listen address = %q", options.listenAddress)
+	}
+}
+
+func TestHelpGroupsOptionAliases(t *testing.T) {
+	var stderr bytes.Buffer
+	_, err := parseServerOptions([]string{"--help"}, &stderr)
+	if !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("parse help error = %v, want flag.ErrHelp", err)
+	}
+	for _, line := range []string{
+		"-l, --listen address",
+		"-v, --version",
+		"-h, --help",
+	} {
+		if !strings.Contains(stderr.String(), line) {
+			t.Errorf("help does not group %q:\n%s", line, stderr.String())
+		}
+	}
+}
+
+func TestRunPrintsVersionAndExits(t *testing.T) {
+	for _, argument := range []string{"-v", "-version", "--version"} {
+		t.Run(argument, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			if err := run([]string{argument}, &stdout, &stderr); err != nil {
+				t.Fatalf("run %s: %v", argument, err)
+			}
+			if got, want := stdout.String(), "pattyView "+PattyViewVersion+"\n"; got != want {
+				t.Fatalf("version output = %q, want %q", got, want)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("version stderr = %q", stderr.String())
+			}
+		})
 	}
 }
 
