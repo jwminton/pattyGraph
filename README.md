@@ -277,11 +277,14 @@ source examples, bytes, matcher provenance, User-Agent state, and last-seen log 
 
 The working set behaves like a small domain-specific garbage collector.
 Repetition and recency reinforce an entry; shallow one-off observations age out;
-stable or operationally important entries can become Peak and remain visible.
-The result is close to grep with a sliding window, memory, and collection
-pressure.
+stable or operationally important entries can earn bounded Peak membership.
+Peak entries remain outside ordinary time pressure while active, then retire
+after `--grace` consecutive empty intervals. Capacity keeps that longer-lived
+memory selective, and contention signals when `--scale` may need adjustment.
+The result is close to grep with a sliding window, memory, and collection pressure.
 
-`--push`, `--scale`, and `--grace` shape that pressure. Read
+`--push`, `--scale`, `--grace`, and `--peak-limit` shape that pressure and its
+longer-lived memory. Read
 [Time Pressure](docs/TIME_PRESSURE.md) for the full model.
 
 ### Traffic texture survives reduction
@@ -362,6 +365,7 @@ during a live session.
 !!! push 5
 !!! scale 1.0
 !!! grace 20
+!!! peak-limit 20
 
 !!! add Googlebot
 !!! mode Googlebot 1
