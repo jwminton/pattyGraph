@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20.20.2
+          cache: npm
+          cache-dependency-path: cmd/pattyView/package-lock.json
+
+      - name: Install pattyView dependencies
+        working-directory: cmd/pattyView
+        run: npm ci
+
+      - name: Test pattyView
+        working-directory: cmd/pattyView
+        run: npm test
+
+      - name: Build pattyView
+        working-directory: cmd/pattyView
+        run: npm run build
+
+      - name: Verify committed pattyView assets
+        run: git diff --exit-code -- cmd/pattyView/dist
+
+      - name: Test Go packages
+        run: go test -count=1 ./...
+
+      - name: Test Go packages with race detector
+        run: go test -race -count=1 ./...
+
+      - name: Vet Go packages
+        run: go vet ./...
