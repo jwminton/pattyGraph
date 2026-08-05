@@ -14,6 +14,7 @@ cd "$ROOT_DIR"
 APP_NAME="pattyGraph"
 VIEW_NAME="pattyView"
 VIEW_DIR="cmd/pattyView"
+RELEASE_DIR="dist"
 
 if [ ! -f util.go ]; then
     echo "Unable to determine ${APP_NAME} version: util.go was not found." >&2
@@ -34,6 +35,12 @@ if [ "$VIEW_VERSION" != "$RAW_VERSION" ]; then
     exit 1
 fi
 
+VIEW_GO_VERSION=$(sed -nE 's/^[[:space:]]*const[[:space:]]+PattyViewVersion[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$VIEW_DIR/main.go" | head -n 1)
+if [ "$VIEW_GO_VERSION" != "$RAW_VERSION" ]; then
+    echo "Version mismatch: PattyGraph is $RAW_VERSION but the PattyView launcher is ${VIEW_GO_VERSION:-unset}." >&2
+    exit 1
+fi
+
 if [[ "$RAW_VERSION" == v* ]]; then
     VERSION="$RAW_VERSION"
 else
@@ -49,6 +56,10 @@ if [ "${1:-}" = "--debug" ] || [ "${1:-}" = "--profile" ]; then
 fi
 
 echo "Building ${APP_NAME} and ${VIEW_NAME} $VERSION"
+echo "Removing previous release artifacts..."
+rm -rf -- "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR"
+
 echo "Installing pinned PattyView frontend dependencies..."
 (
     cd "$VIEW_DIR"
@@ -60,7 +71,7 @@ echo "Installing pinned PattyView frontend dependencies..."
 for platform in "${platforms[@]}"; do
     IFS="/" read -r GOOS GOARCH <<< "$platform"
 
-    output_dir="dist/${GOOS}-${GOARCH}"
+    output_dir="${RELEASE_DIR}/${GOOS}-${GOARCH}"
     mkdir -p "$output_dir"
 
     graph_output="$output_dir/$APP_NAME"
