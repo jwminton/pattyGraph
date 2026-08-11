@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'preact/hooks'
+import { useMemo, useRef, useState } from 'preact/hooks'
 import {
   alertStatusSummary,
   type AlertTimeline,
@@ -22,11 +22,13 @@ import {
 } from '../domain/trackedLane'
 import type { ChangePoint } from '../domain/changeAnalysis'
 import { qualifiesChangeThreshold } from '../domain/changeThreshold'
+import { selectIncidentRange, type IncidentRangeSelection } from '../domain/incidentRange'
 import type { SearchResultsByInterval } from '../domain/searchSession'
 import type { PattyLogRecord } from '../domain/types'
 
 const laneHeightPixels = 16
 const laneMaximumHeight = 12
+const rangeDragThresholdPixels = 4
 
 interface RenderedTrackedLane {
   id: string
@@ -51,7 +53,10 @@ export function IntervalMap({
   comparisonTargeting,
   comparisonActiveRecord,
   comparisonOriginRecord,
+  rangeSelectionEnabled,
+  rangeSelection,
   onSelect,
+  onRangeSelect,
 }: {
   intervals: PattyLogRecord[]
   alertsByInterval: AlertTimeline
@@ -67,7 +72,14 @@ export function IntervalMap({
   comparisonTargeting: boolean
   comparisonActiveRecord: PattyLogRecord | null
   comparisonOriginRecord: PattyLogRecord | null
+  rangeSelectionEnabled: boolean
+  rangeSelection: IncidentRangeSelection | null
   onSelect: (record: PattyLogRecord) => void
+  onRangeSelect: (
+    selection: IncidentRangeSelection,
+    anchor: PattyLogRecord,
+    comparison: PattyLogRecord,
+  ) => void
 }) {
   const points = useMemo(() => buildIntervalSeries(intervals).reverse(), [intervals])
   const renderedCoreLanes: Array<{ key: 'lines' | CoreIntervalLaneKey; label: string }> = [
@@ -125,6 +137,14 @@ export function IntervalMap({
   const metricLaneTop = searchLaneTop + searchLaneOffset
   const graphHeight = totalLaneCount * laneHeightPixels
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
+  const [rangeDrag, setRangeDrag] = useState<{
+    pointerId: number
+    startIndex: number
+    currentIndex: number
+    startX: number
+    moved: boolean
+  } | null>(null)
+  const suppressClick = useRef(false)
   const activeSelectionRecord = comparisonActive ? comparisonActiveRecord : selectedRecord
   const selectedIndex = points.findIndex((point) => (
     point.record.id === activeSelectionRecord?.id || (
@@ -137,6 +157,17 @@ export function IntervalMap({
   const comparisonOriginIndex = comparisonActive
     ? points.findIndex((point) => point.record.id === comparisonOriginRecord?.id)
     : -1
+  const committedRangeStart = rangeSelection
+    ? points.findIndex((point) => point.record.id === rangeSelection.from.id)
+    : -1
+  const committedRangeEnd = rangeSelection
+    ? points.findIndex((point) => point.record.id === rangeSelection.through.id)
+    : -1
+  const displayedRange = rangeDrag?.moved
+    ? normalizedIndexRange(rangeDrag.startIndex, rangeDrag.currentIndex)
+    : committedRangeStart >= 0 && committedRangeEnd >= 0
+      ? normalizedIndexRange(committedRangeStart, committedRangeEnd)
+      : null
   const hoverVisible = hoveredIndex !== null &&
     hoveredIndex !== selectedIndex &&
     (!comparisonTargeting || hoveredIndex !== comparisonOriginIndex)
@@ -206,6 +237,67 @@ export function IntervalMap({
     selectIndex(next)
   }
 
+  const handlePointerDown = (event: PointerEvent) => {
+    if (!rangeSelectionEnabled || comparisonTargeting || event.button !== 0) {
+      return
+    }
+    const target = event.currentTarget as HTMLElement
+    target.setPointerCapture(event.pointerId)
+    suppressClick.current = false
+    const index = pointFromPointer({ clientX: event.clientX, currentTarget: target })
+    setRangeDrag({
+      pointerId: event.pointerId,
+      startIndex: index,
+      currentIndex: index,
+      startX: event.clientX,
+      moved: false,
+    })
+  }
+
+  const handlePointerMove = (event: PointerEvent) => {
+    const target = event.currentTarget as HTMLElement
+    const index = pointFromPointer({ clientX: event.clientX, currentTarget: target })
+    setHoveredIndex(index)
+    if (!rangeDrag || rangeDrag.pointerId !== event.pointerId) {
+      return
+    }
+    const moved = rangeDrag.moved || Math.abs(event.clientX - rangeDrag.startX) >= rangeDragThresholdPixels
+    if (moved) {
+      event.preventDefault()
+    }
+    if (index !== rangeDrag.currentIndex || moved !== rangeDrag.moved) {
+      setRangeDrag({ ...rangeDrag, currentIndex: index, moved })
+    }
+  }
+
+  const finishRangeDrag = (event: PointerEvent) => {
+    if (!rangeDrag || rangeDrag.pointerId !== event.pointerId) {
+      return
+    }
+    const target = event.currentTarget as HTMLElement
+    if (target.hasPointerCapture(event.pointerId)) {
+      target.releasePointerCapture(event.pointerId)
+    }
+    if (rangeDrag.moved && rangeDrag.startIndex !== rangeDrag.currentIndex) {
+      suppressClick.current = true
+      const anchor = points[rangeDrag.startIndex].record
+      const comparison = points[rangeDrag.currentIndex].record
+      onRangeSelect(
+        selectIncidentRange(intervals, anchor, comparison),
+        anchor,
+        comparison,
+      )
+      event.preventDefault()
+    }
+    setRangeDrag(null)
+  }
+
+  const cancelRangeDrag = (event: PointerEvent) => {
+    if (rangeDrag?.pointerId === event.pointerId) {
+      setRangeDrag(null)
+    }
+  }
+
   return (
     <section
       class={comparisonTargeting ? 'interval-map comparison-targeting' : 'interval-map'}
@@ -260,7 +352,7 @@ export function IntervalMap({
           ))}
         </div>
         <div
-          class={comparisonTargeting ? 'interval-map-track comparison-targeting' : 'interval-map-track'}
+          class={`interval-map-track${comparisonTargeting ? ' comparison-targeting' : ''}${rangeSelectionEnabled ? ' range-enabled' : ''}${rangeDrag?.moved ? ' range-dragging' : ''}`}
           style={{ height: `${graphHeight}px` }}
           role="slider"
           tabIndex={0}
@@ -271,9 +363,21 @@ export function IntervalMap({
           aria-valuetext={activePoint
             ? intervalReadout(activePoint, enabledCoreLanes, renderedMetricLanes, renderedLanes, activeIndex, activeAlerts, activeSearchResults.length, activeChange)
             : undefined}
-          onPointerMove={(event) => setHoveredIndex(pointFromPointer(event))}
-          onPointerLeave={() => setHoveredIndex(null)}
+          title={rangeSelectionEnabled && !comparisonTargeting ? 'Drag to select an investigation range' : undefined}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={finishRangeDrag}
+          onPointerCancel={cancelRangeDrag}
+          onPointerLeave={() => {
+            if (!rangeDrag) {
+              setHoveredIndex(null)
+            }
+          }}
           onClick={(event) => {
+            if (suppressClick.current) {
+              suppressClick.current = false
+              return
+            }
             const index = pointFromPointer(event)
             if (pointerIsInSearchLane(event)) {
               const hits = searchResultsByInterval.get(points[index]?.record.id ?? '') ?? []
@@ -293,6 +397,33 @@ export function IntervalMap({
             aria-hidden="true"
           >
             <rect class="interval-map-background" x="0" y="0" width={points.length} height={graphHeight} />
+            {displayedRange ? (
+              <>
+                <rect
+                  class={rangeDrag?.moved ? 'interval-map-range preview' : 'interval-map-range'}
+                  x={displayedRange.start}
+                  y="1"
+                  width={displayedRange.end - displayedRange.start + 1}
+                  height={graphHeight - 2}
+                />
+                <line
+                  class="interval-map-range-edge"
+                  x1={displayedRange.start + 0.5}
+                  y1="1"
+                  x2={displayedRange.start + 0.5}
+                  y2={graphHeight - 1}
+                  vector-effect="non-scaling-stroke"
+                />
+                <line
+                  class="interval-map-range-edge"
+                  x1={displayedRange.end + 0.5}
+                  y1="1"
+                  x2={displayedRange.end + 0.5}
+                  y2={graphHeight - 1}
+                  vector-effect="non-scaling-stroke"
+                />
+              </>
+            ) : null}
             {Array.from({ length: totalLaneCount - 1 }, (_, index) => (
               <line
                 class="interval-map-separator"
@@ -508,6 +639,13 @@ function AlertMarker({
   return className
     ? <line class={className} x1={x} y1={laneTop + 2} x2={x} y2={laneTop + 14} vector-effect="non-scaling-stroke" />
     : null
+}
+
+function normalizedIndexRange(first: number, second: number) {
+  return {
+    start: Math.min(first, second),
+    end: Math.max(first, second),
+  }
 }
 
 function verticalPath(

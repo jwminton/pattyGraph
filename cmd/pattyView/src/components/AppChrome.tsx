@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, FileJson, FolderOpen, Radio } from 'lucide-preact'
+import { Activity, AlertTriangle, FileArchive, FileJson, FolderOpen, Radio } from 'lucide-preact'
 
 export function Brand() {
   const colors = ['#ff6b6b', '#f0b35a', '#e8d34f', '#4ecb71', '#4ecdc4']
@@ -18,8 +18,12 @@ export function SourceStatus({ mode, status }: { mode: string; status: string })
   }
   return (
     <div class={`source-status ${status}`}>
-      {mode === 'live' ? <Radio size={14} aria-hidden="true" /> : <FileJson size={14} aria-hidden="true" />}
-      <span>{status === 'loading' ? 'Reading' : mode === 'live' ? 'Following' : 'Snapshot'}</span>
+      {mode === 'live'
+        ? <Radio size={14} aria-hidden="true" />
+        : mode === 'bundle'
+          ? <FileArchive size={14} aria-hidden="true" />
+          : <FileJson size={14} aria-hidden="true" />}
+      <span>{status === 'loading' ? 'Reading' : mode === 'live' ? 'Following' : mode === 'bundle' ? 'Bundle' : 'Snapshot'}</span>
     </div>
   )
 }
@@ -41,15 +45,15 @@ export function EmptyState({
       <div class="empty-actions">
         <button class="primary-button" type="button" onClick={onOpen}>
           <FolderOpen size={18} aria-hidden="true" />
-          {supportsLiveFile ? 'Open and follow' : 'Open file'}
+          {supportsLiveFile ? 'Open and follow' : 'Open snapshot / bundle'}
         </button>
         {supportsLiveFile ? (
           <button class="secondary-button" type="button" onClick={onSnapshot}>
-            Open snapshot
+            Open snapshot / bundle
           </button>
         ) : null}
       </div>
-      <span class="drop-hint">or drop a .jsonl snapshot here</span>
+      <span class="drop-hint">or drop a .jsonl snapshot or incident .zip here</span>
       <span class="viewer-version">pattyView {__PATTY_VIEW_VERSION__}</span>
     </main>
   )

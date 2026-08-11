@@ -21,10 +21,9 @@ test('falls back to snapshot opening without the file handle API', async ({ page
   })
   await page.goto('/')
 
-  await expect(page.getByRole('main').getByRole('button', { name: 'Open file' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Open snapshot' })).toHaveCount(0)
+  await expect(page.getByRole('main').getByRole('button', { name: 'Open snapshot / bundle' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open a snapshot or incident bundle' })).toHaveCount(0)
   await page.locator('input[type="file"]').setInputFiles(fixture)
   await expect(page.getByText('6 records')).toBeVisible()
-  await expect(page.getByText('Snapshot')).toBeVisible()
+  await expect(page.getByText('Snapshot', { exact: true })).toBeVisible()
 })
-

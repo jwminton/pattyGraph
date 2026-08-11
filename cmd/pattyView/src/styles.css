@@ -478,6 +478,8 @@ summary:focus-visible {
   width: 100%;
   height: 80px;
   cursor: pointer;
+  touch-action: pan-y;
+  user-select: none;
 }
 
 .interval-map-track svg {
@@ -496,8 +498,31 @@ summary:focus-visible {
   cursor: crosshair;
 }
 
+.interval-map-track.range-enabled {
+  cursor: crosshair;
+}
+
+.interval-map-track.range-dragging {
+  cursor: col-resize;
+}
+
 .interval-map-background {
   fill: #101311;
+}
+
+.interval-map-range {
+  fill: #f0b35a;
+  opacity: 0.12;
+}
+
+.interval-map-range.preview {
+  opacity: 0.18;
+}
+
+.interval-map-range-edge {
+  stroke: #f0b35a;
+  stroke-width: 1.5;
+  opacity: 0.92;
 }
 
 .interval-map-separator {
@@ -633,6 +658,82 @@ summary:focus-visible {
   stroke: #72b8ff;
   stroke-width: 2;
   opacity: 1;
+}
+
+.incident-range-bar {
+  flex: none;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 10px 5px 14px;
+  border-bottom: 1px solid #3b352a;
+  background: #191815;
+}
+
+.incident-range-bar.download-only {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.incident-range-summary {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.incident-range-summary strong {
+  color: #f0b35a;
+  font-size: 11px;
+}
+
+.incident-range-summary span {
+  color: #9ba29c;
+  font-size: 10px;
+}
+
+.incident-range-bar code,
+.incident-range-error {
+  min-width: 0;
+  overflow: hidden;
+  color: #d7c39c;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incident-range-error {
+  color: #f18a8a;
+}
+
+.incident-range-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.incident-range-actions .icon-button {
+  width: 30px;
+  min-height: 30px;
+}
+
+.incident-download-button {
+  min-height: 30px;
+  padding: 4px 9px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.incident-download-spinner {
+  animation: incident-spin 0.9s linear infinite;
+}
+
+.incident-download-error {
+  color: #f18a8a;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 /* Workspace and record navigation */
@@ -2242,6 +2343,10 @@ summary:focus-visible {
   to { opacity: 1; }
 }
 
+@keyframes incident-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 1050px) {
   .metric-band {
     grid-template-columns: repeat(3, minmax(110px, 1fr));
@@ -2308,6 +2413,21 @@ summary:focus-visible {
     grid-template-columns: 72px minmax(0, 1fr);
     padding-left: 7px;
     padding-right: 10px;
+  }
+
+  .incident-range-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .incident-range-bar code,
+  .incident-range-error {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .incident-range-actions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
   }
 
   .record-navigator {

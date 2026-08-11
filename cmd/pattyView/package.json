@@ -12,6 +12,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@zip.js/zip.js": "^2.8.36",
     "lucide-preact": "^1.25.0",
     "preact": "^10.29.7"
   },

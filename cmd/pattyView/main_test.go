@@ -10,10 +10,10 @@ import (
 	"testing"
 )
 
-func TestParseServerOptions(t *testing.T) {
+func TestParseApplicationOptions(t *testing.T) {
 	var stderr bytes.Buffer
 
-	options, err := parseServerOptions(nil, &stderr)
+	options, err := parseApplicationOptions(nil, &stderr)
 	if err != nil {
 		t.Fatalf("parse default options: %v", err)
 	}
@@ -21,7 +21,7 @@ func TestParseServerOptions(t *testing.T) {
 		t.Fatalf("default listen address = %q, want %q", options.listenAddress, defaultListenAddress)
 	}
 
-	options, err = parseServerOptions([]string{"--listen", "127.0.0.1:0"}, &stderr)
+	options, err = parseApplicationOptions([]string{"--listen", "127.0.0.1:0"}, &stderr)
 	if err != nil {
 		t.Fatalf("parse custom options: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestParseServerOptions(t *testing.T) {
 		t.Fatalf("custom listen address = %q", options.listenAddress)
 	}
 
-	options, err = parseServerOptions([]string{"-l", "127.0.0.1:4180"}, &stderr)
+	options, err = parseApplicationOptions([]string{"-l", "127.0.0.1:4180"}, &stderr)
 	if err != nil {
 		t.Fatalf("parse shorthand listen option: %v", err)
 	}
@@ -40,13 +40,16 @@ func TestParseServerOptions(t *testing.T) {
 
 func TestHelpGroupsOptionAliases(t *testing.T) {
 	var stderr bytes.Buffer
-	_, err := parseServerOptions([]string{"--help"}, &stderr)
+	_, err := parseApplicationOptions([]string{"--help"}, &stderr)
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("parse help error = %v, want flag.ErrHelp", err)
 	}
 	for _, line := range []string{
 		"-l, --listen address",
 		"-v, --version",
+		"--bundle PattyLog",
+		"--from log-time",
+		"--through log-time",
 		"-h, --help",
 	} {
 		if !strings.Contains(stderr.String(), line) {
@@ -73,8 +76,8 @@ func TestRunPrintsVersionAndExits(t *testing.T) {
 	}
 }
 
-func TestParseServerOptionsRejectsPositionalArguments(t *testing.T) {
-	_, err := parseServerOptions([]string{"traffic.jsonl"}, &bytes.Buffer{})
+func TestParseApplicationOptionsRejectsPositionalArguments(t *testing.T) {
+	_, err := parseApplicationOptions([]string{"traffic.jsonl"}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "unexpected positional argument") {
 		t.Fatalf("parse positional argument error = %v", err)
 	}

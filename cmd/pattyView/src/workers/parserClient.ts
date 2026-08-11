@@ -66,6 +66,45 @@ export class ParserWorkerClient {
     }
   }
 
+  async parseStream(
+    stream: ReadableStream<Uint8Array>,
+    totalBytes: number,
+    onBatch: (batch: ParseBatch) => void,
+    onProgress?: (bytesRead: number, totalBytes: number) => void,
+  ): Promise<void> {
+    const reader = stream.getReader()
+    let bytesRead = 0
+    try {
+      while (true) {
+        const result = await reader.read()
+        if (result.done) {
+          break
+        }
+        const chunk = result.value
+        let offset = 0
+        while (offset < chunk.byteLength) {
+          const end = Math.min(offset + chunkSize, chunk.byteLength)
+          const buffer = chunk.slice(offset, end).buffer
+          onBatch(await this.request({ type: 'parse', buffer, finalize: false }, [buffer]))
+          bytesRead += end - offset
+          offset = end
+          onProgress?.(bytesRead, totalBytes)
+        }
+      }
+      onBatch(await this.request({
+        type: 'parse',
+        buffer: new ArrayBuffer(0),
+        finalize: true,
+      }))
+      onProgress?.(bytesRead, totalBytes)
+    } catch (error) {
+      await reader.cancel(error).catch(() => undefined)
+      throw error
+    } finally {
+      reader.releaseLock()
+    }
+  }
+
   terminate(): void {
     this.worker.terminate()
     this.rejectAll(new Error('JSONL worker terminated'))

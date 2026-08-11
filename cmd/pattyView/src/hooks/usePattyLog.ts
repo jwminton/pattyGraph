@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { classifyFileChange, snapshotFile, type FileSnapshot } from '../domain/fileChange'
 import {
+  isIncidentBundleFile,
+  openIncidentBundle,
+  validateIncidentBundleRecords,
+  type IncidentBundleManifest,
+  type OpenIncidentBundle,
+} from '../domain/incidentBundle'
+import {
   ParsePublicationBuffer,
   parsePublicationMode,
   shouldPublishProgress,
@@ -23,7 +30,7 @@ interface FilePickerWindow extends Window {
   }) => Promise<PattyFileHandle[]>
 }
 
-export type SourceMode = 'idle' | 'snapshot' | 'live'
+export type SourceMode = 'idle' | 'snapshot' | 'live' | 'bundle'
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 export interface PattyLogSourceState {
@@ -36,6 +43,7 @@ export interface PattyLogSourceState {
   bytesRead: number
   totalBytes: number
   lastUpdated: number | null
+  bundleManifest: IncidentBundleManifest | null
 }
 
 const initialState: PattyLogSourceState = {
@@ -48,6 +56,7 @@ const initialState: PattyLogSourceState = {
   bytesRead: 0,
   totalBytes: 0,
   lastUpdated: null,
+  bundleManifest: null,
 }
 
 export function usePattyLog() {
@@ -59,6 +68,7 @@ export function usePattyLog() {
   const timerRef = useRef<number | null>(null)
   const pollingRef = useRef(false)
   const generationRef = useRef(0)
+  const bundleAbortRef = useRef<AbortController | null>(null)
 
   const supportsLiveFile = typeof (window as FilePickerWindow).showOpenFilePicker === 'function'
 
@@ -68,6 +78,11 @@ export function usePattyLog() {
       timerRef.current = null
     }
     handleRef.current = null
+  }, [])
+
+  const cancelBundleLoad = useCallback(() => {
+    bundleAbortRef.current?.abort()
+    bundleAbortRef.current = null
   }, [])
 
   const replaceParser = useCallback(() => {
@@ -173,11 +188,95 @@ export function usePattyLog() {
     }))
   }, [parseFile, replaceParser])
 
+  const resetForBundle = useCallback(async (file: File) => {
+    const generation = ++generationRef.current
+    const abort = new AbortController()
+    bundleAbortRef.current = abort
+    const parser = replaceParser()
+    await parser.reset()
+    setState({
+      ...initialState,
+      fileName: file.name,
+      mode: 'bundle',
+      status: 'loading',
+      totalBytes: file.size,
+    })
+
+    let bundle: OpenIncidentBundle
+    try {
+      bundle = await openIncidentBundle(file, abort.signal)
+    } catch (error) {
+      if (bundleAbortRef.current === abort) {
+        bundleAbortRef.current = null
+      }
+      throw error
+    }
+    try {
+      if (generationRef.current !== generation) {
+        return
+      }
+      setState((current) => ({ ...current, totalBytes: bundle.pattyLogSize }))
+      const records: PattyLogRecord[] = []
+      const issues: ParseIssue[] = []
+      const stream = new TransformStream<Uint8Array, Uint8Array>()
+      const coarseProgress = parsePublicationMode(bundle.pattyLogSize) !== 'immediate'
+      let lastProgressBytes = 0
+      const parse = parser.parseStream(
+        stream.readable,
+        bundle.pattyLogSize,
+        (batch) => {
+          if (generationRef.current === generation) {
+            records.push(...batch.records)
+            issues.push(...batch.issues)
+          }
+        },
+        (bytesRead, totalBytes) => {
+          if (
+            generationRef.current === generation &&
+            shouldPublishProgress(coarseProgress, bytesRead, totalBytes, lastProgressBytes)
+          ) {
+            lastProgressBytes = bytesRead
+            setState((current) => ({ ...current, bytesRead, totalBytes }))
+          }
+        },
+      )
+      const extract = bundle.streamPattyLog(stream.writable, abort.signal)
+      await Promise.all([parse, extract])
+      if (generationRef.current !== generation) {
+        return
+      }
+      const batch = { records, issues }
+      validateIncidentBundleRecords(bundle.manifest, batch)
+      offsetRef.current = 0
+      snapshotRef.current = null
+      setState({
+        ...initialState,
+        records,
+        issues,
+        fileName: file.name,
+        mode: 'bundle',
+        status: 'ready',
+        bytesRead: bundle.pattyLogSize,
+        totalBytes: bundle.pattyLogSize,
+        lastUpdated: Date.now(),
+        bundleManifest: bundle.manifest,
+      })
+    } finally {
+      await bundle.close()
+      if (bundleAbortRef.current === abort) {
+        bundleAbortRef.current = null
+      }
+    }
+  }, [replaceParser])
+
   const reportError = useCallback((error: unknown) => {
-    if (error instanceof DOMException && error.name === 'AbortError') {
+    if (
+      (error instanceof DOMException && error.name === 'AbortError') ||
+      (error instanceof Error && error.name === 'AbortError')
+    ) {
       return
     }
-    const message = error instanceof Error ? error.message : 'Unable to read PattyLog'
+    const message = error instanceof Error ? error.message : 'Unable to read PattyLog or incident bundle'
     setState((current) => ({ ...current, status: 'error', error: message }))
   }, [])
 
@@ -236,12 +335,17 @@ export function usePattyLog() {
 
   const openSnapshot = useCallback(async (file: File) => {
     stopPolling()
+    cancelBundleLoad()
     try {
-      await resetForFile(file, 'snapshot', true)
+      if (await isIncidentBundleFile(file)) {
+        await resetForBundle(file)
+      } else {
+        await resetForFile(file, 'snapshot', true)
+      }
     } catch (error) {
       reportError(error)
     }
-  }, [reportError, resetForFile, stopPolling])
+  }, [cancelBundleLoad, reportError, resetForBundle, resetForFile, stopPolling])
 
   const openLive = useCallback(async () => {
     const picker = (window as FilePickerWindow).showOpenFilePicker
@@ -260,6 +364,7 @@ export function usePattyLog() {
         return
       }
       stopPolling()
+      cancelBundleLoad()
       const file = await handle.getFile()
       handleRef.current = handle
       await resetForFile(file, 'live', false)
@@ -268,12 +373,13 @@ export function usePattyLog() {
     } catch (error) {
       reportError(error)
     }
-  }, [poll, reportError, resetForFile, stopPolling])
+  }, [cancelBundleLoad, poll, reportError, resetForFile, stopPolling])
 
   useEffect(() => () => {
     stopPolling()
+    cancelBundleLoad()
     parserRef.current?.terminate()
-  }, [stopPolling])
+  }, [cancelBundleLoad, stopPolling])
 
   return {
     state,

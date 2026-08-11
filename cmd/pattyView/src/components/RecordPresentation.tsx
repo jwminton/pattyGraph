@@ -15,6 +15,7 @@ import {
   type JsonValue,
   type PattyLogRecord,
 } from '../domain/types'
+import type { IncidentBundleManifest } from '../domain/incidentBundle'
 
 function RecordListItem({ record, selected, onSelect }: {
   record: PattyLogRecord
@@ -94,10 +95,12 @@ export function RecordTitle({ record }: { record: PattyLogRecord }) {
 
 export function RecordOverview({
   record,
+  bundleManifest,
   enabledMetricLanes,
   onToggleMetricLane,
 }: {
   record: PattyLogRecord
+  bundleManifest: IncidentBundleManifest | null
   enabledMetricLanes: IntervalMetricLaneKey[]
   onToggleMetricLane: (key: IntervalMetricLaneKey) => void
 }) {
@@ -112,6 +115,7 @@ export function RecordOverview({
       {!unsupported && record.eventType === 'interval' ? (
         <IntervalOverview
           data={record.data}
+          bundleManifest={bundleManifest}
           enabledMetricLanes={enabledMetricLanes}
           onToggleMetricLane={onToggleMetricLane}
         />
@@ -182,10 +186,12 @@ function IntervalLaneOption({
 
 function IntervalOverview({
   data,
+  bundleManifest,
   enabledMetricLanes,
   onToggleMetricLane,
 }: {
   data: JsonObject
+  bundleManifest: IncidentBundleManifest | null
   enabledMetricLanes: IntervalMetricLaneKey[]
   onToggleMetricLane: (key: IntervalMetricLaneKey) => void
 }) {
@@ -194,6 +200,15 @@ function IntervalOverview({
     ...(readObject(data, 'runtime') ?? {}),
     viewer: `pattyView ${__PATTY_VIEW_VERSION__}`,
     schema_version: readNumber(data, 'schema_version'),
+    ...(bundleManifest ? {
+      bundle_source: bundleManifest.pattylog.source_name,
+      bundle_representation: bundleManifest.pattylog.representation,
+      bundle_session: bundleManifest.pattylog.session_id,
+      bundle_log_range: `${bundleManifest.range.from_log_time} through ${bundleManifest.range.through_log_time}`,
+      bundle_intervals: `${bundleManifest.range.from_interval}-${bundleManifest.range.through_interval} (${bundleManifest.range.interval_count})`,
+      bundle_creator: `${bundleManifest.creator.name} ${bundleManifest.creator.version}`,
+      bundle_schema: bundleManifest.bundle_schema,
+    } : {}),
   }
   const matchers = readArray(data, 'matchers')
   const factoids = readArray(data, 'factoids')

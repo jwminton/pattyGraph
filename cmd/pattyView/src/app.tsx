@@ -2,6 +2,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsDown,
+  FileArchive,
   FileJson,
   FolderOpen,
   Search,
@@ -18,6 +19,7 @@ import {
 import { ChangeThresholdControl } from './components/ChangeThresholdControl'
 import { IntervalComparisonDetail } from './components/IntervalComparison'
 import { IntervalMap } from './components/IntervalMap'
+import { IncidentRangeBar } from './components/IncidentRangeBar'
 import { AlertStrip, FactoidRibbon } from './components/RecordContext'
 import {
   RawRecord,
@@ -29,7 +31,12 @@ import { TrafficDetail } from './components/TrafficDetail'
 import { VirtualRecordList } from './components/VirtualRecordList'
 import { buildAlertTimeline } from './domain/alertTimeline'
 import { buildChangeSeries } from './domain/changeAnalysis'
+import {
+  buildIncidentRangeCommand,
+  type IncidentRangeSelection,
+} from './domain/incidentRange'
 import { buildSessionIndexes, newestRecord, recordIndex } from './domain/model'
+import { planSemanticIncident } from './domain/semanticIncidentBundle'
 import { groupSearchResultsByInterval, searchSessionRecords } from './domain/searchSession'
 import {
   maximumTrackedLanes,
@@ -61,6 +68,7 @@ export function App() {
   const [comparisonReferenceId, setComparisonReferenceId] = useState('')
   const [comparisonOriginId, setComparisonOriginId] = useState('')
   const [comparisonTargeting, setComparisonTargeting] = useState(false)
+  const [incidentRange, setIncidentRange] = useState<IncidentRangeSelection | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const selectedSession = sessions.find((session) => session.id === selectedSessionId)
@@ -99,6 +107,27 @@ export function App() {
   const comparisonOrigin = detailTab === 'compare'
     ? comparableIntervals.find((record) => record.id === comparisonOriginId) ?? null
     : null
+  const incidentRangeCommand = useMemo(() => incidentRange && selectedSession && state.mode !== 'bundle'
+    ? buildIncidentRangeCommand(
+        incidentRange,
+        selectedSession.intervals,
+        state.fileName,
+        selectedSession.id,
+      )
+    : null, [incidentRange, selectedSession, state.fileName, state.mode])
+  const incidentSourceName = state.bundleManifest?.pattylog.source_name || state.fileName
+  const semanticIncidentPlan = useMemo(() => incidentRange && selectedSession
+    ? planSemanticIncident(
+        selectedSession,
+        incidentRange,
+        incidentSourceName,
+        __PATTY_VIEW_VERSION__,
+      )
+    : null, [incidentRange, selectedSession, incidentSourceName])
+  const rangeSelectionEnabled = (
+    state.mode === 'snapshot' || state.mode === 'live' || state.mode === 'bundle'
+  ) &&
+    (selectedSession?.intervals.length ?? 0) > 1
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchQuery(searchText), 125)
@@ -155,20 +184,35 @@ export function App() {
     setComparisonReferenceId('')
     setComparisonOriginId('')
     setComparisonTargeting(false)
+    setIncidentRange(null)
   }, [selectedSession?.id])
 
   useEffect(() => {
-    if (!comparisonTargeting) {
+    if (state.status === 'loading' && state.records.length === 0) {
+      setIncidentRange(null)
+    }
+  }, [state.records.length, state.status])
+
+  useEffect(() => {
+    if (!comparisonTargeting && !incidentRange) {
       return
     }
-    const cancelTargeting = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+
+    const dismissMapGesture = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return
+      }
+
+      event.preventDefault()
+      if (comparisonTargeting) {
         setComparisonTargeting(false)
+      } else {
+        setIncidentRange(null)
       }
     }
-    window.addEventListener('keydown', cancelTargeting)
-    return () => window.removeEventListener('keydown', cancelTargeting)
-  }, [comparisonTargeting])
+    window.addEventListener('keydown', dismissMapGesture)
+    return () => window.removeEventListener('keydown', dismissMapGesture)
+  }, [comparisonTargeting, incidentRange])
 
   useEffect(() => {
     if (detailTab === 'compare' && comparisonReference && comparisonReference.id !== comparisonReferenceId) {
@@ -225,8 +269,13 @@ export function App() {
   const selectDetailTab = (next: DetailTab) => {
     if (next === 'compare') {
       if (detailTab !== 'compare' && trafficAvailable && selectedRecord) {
+        const rangeComparison = incidentRange?.from.id === selectedRecord.id
+          ? incidentRange.through
+          : incidentRange?.through.id === selectedRecord.id
+            ? incidentRange.from
+            : null
         setComparisonOriginId(selectedRecord.id)
-        setComparisonReferenceId('')
+        setComparisonReferenceId(rangeComparison?.schemaVersion === 4 ? rangeComparison.id : '')
       }
       setComparisonTargeting(false)
       setDetailTab(next)
@@ -242,6 +291,19 @@ export function App() {
     }
     setComparisonTargeting(false)
     setDetailTab(next)
+  }
+
+  const selectIncidentMapRange = (
+    selection: IncidentRangeSelection,
+    anchor: PattyLogRecord,
+    comparison: PattyLogRecord,
+  ) => {
+    setIncidentRange(selection)
+    selectRecord(anchor)
+    if (detailTab === 'compare' && anchor.schemaVersion === 4 && comparison.schemaVersion === 4) {
+      setComparisonOriginId(anchor.id)
+      setComparisonReferenceId(comparison.id)
+    }
   }
 
   const selectComparisonReference = (recordId: string) => {
@@ -326,7 +388,7 @@ export function App() {
         ref={fileInputRef}
         class="visually-hidden"
         type="file"
-        accept=".jsonl,application/x-ndjson,application/json"
+        accept=".jsonl,.zip,application/x-ndjson,application/json,application/zip"
         onChange={handleSnapshotInput}
       />
 
@@ -334,7 +396,11 @@ export function App() {
         <Brand />
         <div class="header-context">
           <div class="header-file">
-            {state.fileName ? <FileJson size={16} aria-hidden="true" /> : null}
+            {state.fileName
+              ? state.mode === 'bundle'
+                ? <FileArchive size={16} aria-hidden="true" />
+                : <FileJson size={16} aria-hidden="true" />
+              : null}
             <span title={state.fileName}>{state.fileName || 'No PattyLog open'}</span>
           </div>
           <div class="header-search">
@@ -383,14 +449,14 @@ export function App() {
           <SourceStatus mode={state.mode} status={state.status} />
           <button class="command-button" type="button" onClick={() => void chooseFile()}>
             <FolderOpen size={17} aria-hidden="true" />
-            {supportsLiveFile ? 'Open live' : 'Open file'}
+            {supportsLiveFile ? 'Open live' : 'Open snapshot / bundle'}
           </button>
           {supportsLiveFile ? (
             <button
               class="icon-button"
               type="button"
-              title="Open a static snapshot"
-              aria-label="Open a static snapshot"
+              title="Open a snapshot or incident bundle"
+              aria-label="Open a snapshot or incident bundle"
               onClick={() => fileInputRef.current?.click()}
             >
               <FileJson size={17} aria-hidden="true" />
@@ -427,8 +493,19 @@ export function App() {
             comparisonTargeting={comparisonTargeting}
             comparisonActiveRecord={comparisonReference}
             comparisonOriginRecord={comparisonOrigin}
+            rangeSelectionEnabled={rangeSelectionEnabled}
+            rangeSelection={incidentRange}
             onSelect={selectIntervalMapRecord}
+            onRangeSelect={selectIncidentMapRange}
           />
+          {incidentRange && semanticIncidentPlan ? (
+            <IncidentRangeBar
+              selection={incidentRange}
+              command={incidentRangeCommand}
+              semanticPlan={semanticIncidentPlan}
+              onClear={() => setIncidentRange(null)}
+            />
+          ) : null}
           <div class="workspace">
             <aside class="record-navigator" aria-label="PattyLog records">
             <div class="navigator-heading">
@@ -536,6 +613,7 @@ export function App() {
                 {detailTab === 'overview' ? (
                   <RecordOverview
                     record={selectedRecord}
+                    bundleManifest={state.bundleManifest}
                     enabledMetricLanes={enabledMetricLanes}
                     onToggleMetricLane={toggleMetricLane}
                   />

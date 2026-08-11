@@ -1,5 +1,27 @@
 import { expect, test } from '@playwright/test'
-import { fixture } from './testSupport'
+import { bundleFixture, fixture } from './testSupport'
+
+test('opens a Go-created incident bundle through the existing viewer', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('input[type="file"]').setInputFiles(bundleFixture)
+
+  await expect(page.locator('.header-file')).toContainText('schema4.incident.zip')
+  await expect(page.locator('.source-status')).toHaveText('Bundle')
+  await expect(page.getByText('6 records')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Jul 18, 08:02 AM' })).toBeVisible()
+  const runtime = page.locator('.overview-section').filter({
+    has: page.getByRole('heading', { name: 'Runtime' }),
+  })
+  await expect(runtime).toContainText('Bundle source')
+  await expect(runtime).toContainText('schema4.jsonl')
+  await expect(runtime).toContainText('Bundle representation')
+  await expect(runtime).toContainText('source')
+  await expect(runtime).toContainText('Bundle session')
+  await expect(runtime).toContainText('test-session')
+  await expect(runtime).toContainText('Bundle intervals')
+  await expect(runtime).toContainText('0-1 (2)')
+  await expect(page.getByRole('slider', { name: 'Select a PattyLog interval' })).toBeVisible()
+})
 
 test('opens and navigates a PattyLog snapshot', async ({ page }) => {
   await page.goto('/')
