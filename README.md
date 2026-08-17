@@ -90,7 +90,7 @@ mkdir -p ./splats
 ```
 
 Prebuilt Linux binaries are available from the
-[v0.1.8 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.8).
+[v0.1.9 release](https://github.com/jwminton/pattyGraph/releases/tag/v0.1.9).
 
 The [PattyView browser companion](cmd/pattyView/README.md) is available from
 source and in the prebuilt release. Its production frontend is committed and

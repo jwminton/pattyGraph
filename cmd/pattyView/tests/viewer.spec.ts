@@ -26,7 +26,7 @@ test('opens a Go-created incident bundle through the existing viewer', async ({ 
 test('opens and navigates a PattyLog snapshot', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Open a PattyLog' })).toBeVisible()
-  await expect(page.locator('.viewer-version')).toHaveText('pattyView 0.1.9-dev')
+  await expect(page.locator('.viewer-version')).toHaveText('pattyView 0.1.9')
 
   await page.locator('input[type="file"]').setInputFiles(fixture)
 
@@ -35,7 +35,7 @@ test('opens and navigates a PattyLog snapshot', async ({ page }) => {
   await expect(page.locator('.detail-heading p')).toHaveText('line 7 · interval 1')
   const runtimeSection = page.locator('.overview-section').filter({ has: page.getByRole('heading', { name: 'Runtime' }) })
   await expect(runtimeSection).toContainText('Viewer')
-  await expect(runtimeSection).toContainText('pattyView 0.1.9-dev')
+  await expect(runtimeSection).toContainText('pattyView 0.1.9')
   await expect(runtimeSection).toContainText('Schema version')
   await expect(runtimeSection).toContainText('4')
   await expect(page.getByText('1 malformed line preserved as diagnostics')).toBeVisible()

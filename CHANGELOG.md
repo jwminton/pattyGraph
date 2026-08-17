@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.9
+
+Adds portable incident investigation bundles to PattyView and makes selected
+traffic ranges durable, shareable, and directly reopenable.
+
+- Added drag-based interval range selection tied to normal interval navigation
+  and comparison, with `Escape` dismissal.
+- Added semantic incident ZIP downloads in the browser and direct opening of
+  those bundles in another PattyView session.
+- Added source-faithful incident bundle creation through the PattyView Go CLI
+  for automation, AI-assisted workflows, and exact PattyLog preservation.
+- Added validated bundle manifests, compact filenames, immutable parent
+  artifacts, and support for deriving narrower incident bundles.
+- Added focused Go, TypeScript, and browser coverage for bundle creation,
+  parsing, compatibility, range gestures, and comparison behavior.
+- Added GitHub CI and hosted release-build verification using the repository's
+  normal test and packaging paths.
+
 ## 0.1.8
 
 Adds PattyView as the browser companion for exploring recorded PattyLog sessions

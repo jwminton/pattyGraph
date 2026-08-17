@@ -153,11 +153,6 @@ func (w *ringSeriesAccumulator) Slice() []int {
 	return out
 }
 
-// Slice returns a forward-facing view of the buffer contents as a slice.
-func (w *ringSeriesAccumulator) OldSlice() []int {
-	return w.data[:w.len]
-}
-
 // ReverseSlice returns a reversed slice of the buffer contents.
 // This allocates a new slice (used only for display, so GC is acceptable).
 func (w *ringSeriesAccumulator) ReverseSlice() []int {
