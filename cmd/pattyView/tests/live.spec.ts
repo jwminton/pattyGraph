@@ -81,7 +81,7 @@ test('follows appends, preserves older selection, and resets on replacement', as
     event_type: 'session_start',
     session_id: 'live-b',
     timestamp: '2026-07-18T10:00:00-07:00',
-    version: '0.1.9-dev',
+    version: '0.1.10',
   })
   const replacementInterval = JSON.stringify({
     schema_version: 4,

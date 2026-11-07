@@ -16,7 +16,7 @@ import (
 const defaultListenAddress = "127.0.0.1:4177"
 
 // PattyViewVersion is checked against pattyGraph and package.json by compile.sh.
-const PattyViewVersion = "0.1.9"
+const PattyViewVersion = "0.1.10"
 
 //go:embed dist
 var embeddedDist embed.FS
