@@ -1,4 +1,4 @@
-module pattyGraph
+module github.com/jwminton/pattygraph
 
 go 1.23.3
 
