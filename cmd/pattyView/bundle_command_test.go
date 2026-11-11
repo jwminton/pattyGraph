@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"pattyGraph/cmd/pattyView/internal/investigation"
+	"github.com/jwminton/pattygraph/cmd/pattyView/internal/investigation"
 )
 
 const (

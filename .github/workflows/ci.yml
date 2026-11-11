@@ -56,7 +56,7 @@ jobs:
         run: git diff --exit-code -- cmd/pattyView/dist
 
       - name: Test Go packages with coverage
-        run: go test -coverpkg=$(go list ./... | grep -v '/cmd/') -coverprofile=coverage.out -count=1 ./...
+        run: go test -coverpkg=./... -coverprofile=coverage.out -count=1 ./...
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
