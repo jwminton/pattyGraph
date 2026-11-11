@@ -1,3 +1,4 @@
+
 name: CI
 
 on:
@@ -54,8 +55,14 @@ jobs:
       - name: Verify committed pattyView assets
         run: git diff --exit-code -- cmd/pattyView/dist
 
-      - name: Test Go packages
-        run: go test -count=1 ./...
+      - name: Test Go packages with coverage
+        run: go test -coverpkg=./... -coverprofile=coverage.out -count=1 ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          files: ./coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Test Go packages with race detector
         run: go test -race -count=1 ./...
